@@ -13,6 +13,32 @@ struct AliasEditor: View {
     }
 
     var body: some View {
+        #if os(iOS)
+        NavigationStack {
+            Form {
+                Section("公式") {
+                    Text(line.expression)
+                        .font(.system(.body, design: .monospaced))
+                }
+                Section("备注") {
+                    TextField("例如：本月预算", text: $alias)
+                        .onSubmit(save)
+                }
+            }
+            .navigationTitle("设置备注")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("保存", action: save)
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+        #else
         VStack(alignment: .leading, spacing: 16) {
             Text("设置备注")
                 .font(.title3.weight(.semibold))
@@ -35,6 +61,7 @@ struct AliasEditor: View {
         }
         .padding(24)
         .frame(width: 360)
+        #endif
     }
 
     private func save() {
@@ -59,6 +86,40 @@ struct VariableEditor: View {
     }
 
     var body: some View {
+        #if os(iOS)
+        NavigationStack {
+            Form {
+                Section("结果") {
+                    Text("= \(NumberDisplay.string(result))")
+                        .font(.system(.body, design: .monospaced))
+                }
+                Section {
+                    TextField("例如：tax_rate", text: $name)
+                        .formulaKeyboard()
+                        .onSubmit(save)
+                } header: {
+                    Text("变量名")
+                } footer: {
+                    if !error.isEmpty {
+                        Text(error)
+                            .foregroundStyle(.red)
+                    }
+                }
+            }
+            .navigationTitle("存为变量")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("保存", action: save)
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+        #else
         VStack(alignment: .leading, spacing: 16) {
             Text("保存结果为变量")
                 .font(.title3.weight(.semibold))
@@ -92,6 +153,7 @@ struct VariableEditor: View {
         }
         .padding(24)
         .frame(width: 360)
+        #endif
     }
 
     private func save() {
@@ -111,6 +173,59 @@ struct VariableManager: View {
     @State private var error = ""
 
     var body: some View {
+        #if os(iOS)
+        NavigationStack {
+            Form {
+                Section("新建变量") {
+                    TextField("变量名", text: $name)
+                        .formulaKeyboard()
+                    TextField("数值", text: $value)
+                        .numericKeyboard()
+                    Button("添加") { addVariable() }
+                    if !error.isEmpty {
+                        Text(error)
+                            .font(.footnote)
+                            .foregroundStyle(.red)
+                    }
+                }
+
+                Section("已有变量") {
+                    if store.variables.isEmpty {
+                        Text("暂无变量。可以直接写在公式里：total = 1200 * (1 + tax)。")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(store.variables) { variable in
+                            HStack {
+                                Text(variable.name)
+                                    .font(.system(.body, design: .monospaced))
+                                Spacer()
+                                Text(NumberDisplay.string(variable.value))
+                                    .font(.system(.body, design: .monospaced))
+                                    .foregroundStyle(.secondary)
+                            }
+                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                Button("删除", role: .destructive) {
+                                    store.deleteVariable(variable)
+                                }
+                                Button("复制") {
+                                    Clipboard.copy(variable.name)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("管理变量")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("完成") { dismiss() }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+        #else
         VStack(alignment: .leading, spacing: 16) {
             HStack {
                 Text("管理变量")
@@ -126,13 +241,7 @@ struct VariableManager: View {
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 100)
                 AppIconButton(systemName: "plus", help: "添加变量", tint: AppDesign.ink) {
-                    guard let number = Double(value), store.upsertVariable(name: name, value: number) else {
-                        error = "变量名或数值无效"
-                        return
-                    }
-                    name = ""
-                    value = ""
-                    error = ""
+                    addVariable()
                 }
             }
             if !error.isEmpty {
@@ -169,13 +278,29 @@ struct VariableManager: View {
         }
         .padding(24)
         .frame(width: 520, height: 430)
+        #endif
+    }
+
+    private func addVariable() {
+        guard let number = Double(value), store.upsertVariable(name: name, value: number) else {
+            error = "变量名或数值无效"
+            return
+        }
+        name = ""
+        value = ""
+        error = ""
     }
 }
 
 struct VariableRow: View {
+    @Environment(\.horizontalSizeClass) private var sizeClass
     @EnvironmentObject private var store: CalculatorStore
     let variable: CalculatorVariable
     @State private var isHovering = false
+
+    private var showsActions: Bool {
+        isHovering || AppLayout.isCompact(sizeClass)
+    }
 
     var body: some View {
         HStack(spacing: 8) {
@@ -184,7 +309,7 @@ struct VariableRow: View {
                 .foregroundStyle(AppDesign.secondary)
                 .lineLimit(1)
             Spacer()
-            if isHovering {
+            if showsActions {
                 AppIconButton(systemName: "doc.on.doc", help: "复制变量名") {
                     Clipboard.copy(variable.name)
                 }
@@ -207,8 +332,85 @@ struct VariableRow: View {
     }
 }
 
-struct SettingsModal: View {
+struct SettingsForm: View {
     @EnvironmentObject private var store: CalculatorStore
+    var showsDoneButton = false
+    var onDismiss: (() -> Void)? = nil
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Stepper(value: Binding(
+                get: { store.historyLimit },
+                set: { store.updateHistoryLimit($0) }
+            ), in: 10...500, step: 10) {
+                HStack {
+                    Text("保存历史行数")
+                    Spacer()
+                    Text("\(store.historyLimit)")
+                        .foregroundStyle(AppDesign.muted)
+                }
+            }
+            .font(.system(size: 13))
+
+            Text("置顶记录不会被普通历史清理。")
+                .font(.system(size: 12))
+                .foregroundStyle(AppDesign.muted)
+
+            Divider().overlay(AppDesign.hairline)
+
+            Button("清除未置顶历史", role: .destructive) {
+                store.clearUnpinnedHistory()
+            }
+            .font(.system(size: 13))
+
+            if showsDoneButton, let onDismiss {
+                HStack {
+                    Spacer()
+                    Button("完成", action: onDismiss)
+                        .buttonStyle(.borderedProminent)
+                        .tint(AppDesign.ink)
+                        .keyboardShortcut(.defaultAction)
+                }
+            }
+        }
+    }
+}
+
+struct SettingsPage: View {
+    @EnvironmentObject private var store: CalculatorStore
+
+    var body: some View {
+        Form {
+            Section {
+                Stepper(value: Binding(
+                    get: { store.historyLimit },
+                    set: { store.updateHistoryLimit($0) }
+                ), in: 10...500, step: 10) {
+                    HStack {
+                        Text("保存历史行数")
+                        Spacer()
+                        Text("\(store.historyLimit)")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            } footer: {
+                Text("置顶记录不会被普通历史清理。")
+            }
+
+            Section {
+                Button("清除未置顶历史", role: .destructive) {
+                    store.clearUnpinnedHistory()
+                }
+            }
+        }
+        .navigationTitle("设置")
+        #if os(iOS)
+        .navigationBarTitleDisplayMode(.inline)
+        #endif
+    }
+}
+
+struct SettingsModal: View {
     let onDismiss: () -> Void
 
     var body: some View {
@@ -235,37 +437,7 @@ struct SettingsModal: View {
                     .keyboardShortcut(.cancelAction)
                 }
 
-                Stepper(value: Binding(
-                    get: { store.historyLimit },
-                    set: { store.updateHistoryLimit($0) }
-                ), in: 10...500, step: 10) {
-                    HStack {
-                        Text("保存历史行数")
-                        Spacer()
-                        Text("\(store.historyLimit)")
-                            .foregroundStyle(AppDesign.muted)
-                    }
-                }
-                .font(.system(size: 13))
-
-                Text("置顶记录不会被普通历史清理。")
-                    .font(.system(size: 12))
-                    .foregroundStyle(AppDesign.muted)
-
-                Divider().overlay(AppDesign.hairline)
-
-                Button("清除未置顶历史", role: .destructive) {
-                    store.clearUnpinnedHistory()
-                }
-                .font(.system(size: 13))
-
-                HStack {
-                    Spacer()
-                    Button("完成", action: onDismiss)
-                        .buttonStyle(.borderedProminent)
-                        .tint(AppDesign.ink)
-                        .keyboardShortcut(.defaultAction)
-                }
+                SettingsForm(showsDoneButton: true, onDismiss: onDismiss)
             }
             .padding(22)
             .frame(width: 360)

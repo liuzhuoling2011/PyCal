@@ -1,4 +1,3 @@
-import AppKit
 import SwiftUI
 
 enum AppDesign {
@@ -121,38 +120,6 @@ struct RailItemButton: View {
     }
 }
 
-final class NonMovingView: NSView {
-    override var mouseDownCanMoveWindow: Bool { false }
-}
-
-struct WindowDragBlocker: NSViewRepresentable {
-    func makeNSView(context: Context) -> NonMovingView {
-        NonMovingView()
-    }
-
-    func updateNSView(_ nsView: NonMovingView, context: Context) {}
-}
-
-final class NonMovingHostingView<Content: View>: NSHostingView<Content> {
-    override var mouseDownCanMoveWindow: Bool { false }
-}
-
-struct WindowDragDisabled<Content: View>: NSViewRepresentable {
-    var content: Content
-
-    init(@ViewBuilder content: () -> Content) {
-        self.content = content()
-    }
-
-    func makeNSView(context: Context) -> NonMovingHostingView<Content> {
-        NonMovingHostingView(rootView: content)
-    }
-
-    func updateNSView(_ nsView: NonMovingHostingView<Content>, context: Context) {
-        nsView.rootView = content
-    }
-}
-
 struct QuietTextButton: View {
     let title: String
     let action: () -> Void
@@ -162,13 +129,6 @@ struct QuietTextButton: View {
             .buttonStyle(.plain)
             .font(.system(size: 12))
             .foregroundStyle(AppDesign.muted)
-    }
-}
-
-enum Clipboard {
-    static func copy(_ value: String) {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(value, forType: .string)
     }
 }
 

@@ -1,30 +1,56 @@
 import SwiftUI
 
 struct TimeConverterView: View {
+    @Environment(\.horizontalSizeClass) private var sizeClass
     @StateObject private var store = TimeConverterStore()
+
+    private var isCompact: Bool { AppLayout.isCompact(sizeClass) }
+    private var gutter: CGFloat { AppLayout.gutter(sizeClass) }
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 16) {
-                Spacer()
-                UnitSegment(store: store)
-                TimezonePicker(store: store)
+            HStack(spacing: 12) {
+                if isCompact {
+                    UnitSegment(store: store)
+                    Spacer(minLength: 8)
+                    TimezonePicker(store: store)
+                } else {
+                    Spacer()
+                    UnitSegment(store: store)
+                    TimezonePicker(store: store)
+                }
             }
-            .padding(.horizontal, 28)
-            .padding(.top, 16)
+            .padding(.horizontal, gutter)
+            .padding(.top, isCompact ? 12 : 16)
             .padding(.bottom, 4)
 
-            HStack(alignment: .top, spacing: 0) {
-                DateColumn(store: store)
+            if isCompact {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        DateColumn(store: store)
+                        Rectangle()
+                            .fill(AppDesign.hairline)
+                            .frame(height: 1)
+                            .padding(.horizontal, gutter)
+                            .padding(.vertical, 8)
+                        TimestampColumn(store: store)
+                    }
                     .frame(maxWidth: .infinity, alignment: .leading)
-                Rectangle()
-                    .fill(AppDesign.hairline)
-                    .frame(width: 1)
-                    .padding(.vertical, 8)
-                TimestampColumn(store: store)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .scrollDismissesKeyboard(.interactively)
+            } else {
+                HStack(alignment: .top, spacing: 0) {
+                    DateColumn(store: store)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Rectangle()
+                        .fill(AppDesign.hairline)
+                        .frame(width: 1)
+                        .padding(.vertical, 8)
+                    TimestampColumn(store: store)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
 
             LiveTimestampBar(store: store)
         }
@@ -95,7 +121,9 @@ private struct TimezonePicker: View {
             .font(.system(size: 12.5))
             .foregroundStyle(AppDesign.muted)
         }
+        #if os(macOS)
         .menuStyle(.borderlessButton)
+        #endif
         .fixedSize()
     }
 
@@ -106,6 +134,7 @@ private struct TimezonePicker: View {
 }
 
 private struct DateColumn: View {
+    @Environment(\.horizontalSizeClass) private var sizeClass
     @ObservedObject var store: TimeConverterStore
 
     var body: some View {
@@ -118,6 +147,7 @@ private struct DateColumn: View {
                 .textFieldStyle(.plain)
                 .font(.system(size: 16, design: .monospaced))
                 .foregroundStyle(AppDesign.ink)
+                .numericKeyboard()
                 .onChange(of: store.dateInput) { _, _ in store.convertDateInput(showError: false) }
                 .onSubmit { store.convertDateInput() }
                 .padding(.bottom, 11)
@@ -142,7 +172,7 @@ private struct DateColumn: View {
                 Text(error).font(.system(size: 11)).foregroundStyle(.red).padding(.top, 8)
             }
         }
-        .padding(.horizontal, 28)
+        .padding(.horizontal, AppLayout.gutter(sizeClass))
         .padding(.top, 18)
     }
 
@@ -156,6 +186,7 @@ private struct DateColumn: View {
 }
 
 private struct TimestampColumn: View {
+    @Environment(\.horizontalSizeClass) private var sizeClass
     @ObservedObject var store: TimeConverterStore
 
     var body: some View {
@@ -168,6 +199,7 @@ private struct TimestampColumn: View {
                 .textFieldStyle(.plain)
                 .font(.system(size: 16, design: .monospaced))
                 .foregroundStyle(AppDesign.ink)
+                .numericKeyboard()
                 .onChange(of: store.timestampInput) { _, _ in store.convertTimestampToDate(showError: false) }
                 .onSubmit { store.convertTimestampToDate() }
                 .padding(.bottom, 11)
@@ -193,46 +225,80 @@ private struct TimestampColumn: View {
                 Text(error).font(.system(size: 11)).foregroundStyle(.red).padding(.top, 8)
             }
         }
-        .padding(.horizontal, 28)
+        .padding(.horizontal, AppLayout.gutter(sizeClass))
         .padding(.top, 18)
     }
 }
 
 private struct LiveTimestampBar: View {
+    @Environment(\.horizontalSizeClass) private var sizeClass
     @ObservedObject var store: TimeConverterStore
+
+    private var isCompact: Bool { AppLayout.isCompact(sizeClass) }
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: store.unit == .nanoseconds ? 0.1 : 1)) { context in
             let liveDate = store.isPaused ? store.pausedDate : context.date
-            HStack(spacing: 14) {
-                HStack(spacing: 6) {
-                    Circle()
-                        .fill(store.isPaused ? Color.orange : AppDesign.preview)
-                        .frame(width: 6, height: 6)
-                    Text(store.isPaused ? "已暂停" : "实时")
-                        .font(.system(size: 12.5))
-                        .foregroundStyle(AppDesign.muted)
-                }
-                Text(store.timestampString(for: liveDate))
-                    .font(.system(size: 13.5, design: .monospaced))
-                    .foregroundStyle(AppDesign.ink)
-                    .textSelection(.enabled)
-                Spacer()
-                QuietTextButton(title: "复制") {
-                    Clipboard.copy(store.timestampString(for: liveDate))
-                }
-                QuietTextButton(title: store.isPaused ? "继续" : "暂停") {
-                    store.togglePause()
-                }
-                QuietTextButton(title: "重置") {
-                    store.resetLiveClock()
+            Group {
+                if isCompact {
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack(spacing: 8) {
+                            liveIndicator
+                            Text(store.timestampString(for: liveDate))
+                                .font(.system(size: 13.5, design: .monospaced))
+                                .foregroundStyle(AppDesign.ink)
+                                .textSelection(.enabled)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.8)
+                        }
+                        HStack(spacing: 16) {
+                            QuietTextButton(title: "复制") {
+                                Clipboard.copy(store.timestampString(for: liveDate))
+                            }
+                            QuietTextButton(title: store.isPaused ? "继续" : "暂停") {
+                                store.togglePause()
+                            }
+                            QuietTextButton(title: "重置") {
+                                store.resetLiveClock()
+                            }
+                        }
+                    }
+                } else {
+                    HStack(spacing: 14) {
+                        liveIndicator
+                        Text(store.timestampString(for: liveDate))
+                            .font(.system(size: 13.5, design: .monospaced))
+                            .foregroundStyle(AppDesign.ink)
+                            .textSelection(.enabled)
+                        Spacer()
+                        QuietTextButton(title: "复制") {
+                            Clipboard.copy(store.timestampString(for: liveDate))
+                        }
+                        QuietTextButton(title: store.isPaused ? "继续" : "暂停") {
+                            store.togglePause()
+                        }
+                        QuietTextButton(title: "重置") {
+                            store.resetLiveClock()
+                        }
+                    }
                 }
             }
-            .padding(.horizontal, 28)
-            .padding(.vertical, 14)
+            .padding(.horizontal, AppLayout.gutter(sizeClass))
+            .padding(.vertical, isCompact ? 12 : 14)
             .overlay(alignment: .top) {
                 Rectangle().fill(AppDesign.hairline).frame(height: 1)
             }
+        }
+    }
+
+    private var liveIndicator: some View {
+        HStack(spacing: 6) {
+            Circle()
+                .fill(store.isPaused ? Color.orange : AppDesign.preview)
+                .frame(width: 6, height: 6)
+            Text(store.isPaused ? "已暂停" : "实时")
+                .font(.system(size: 12.5))
+                .foregroundStyle(AppDesign.muted)
         }
     }
 }

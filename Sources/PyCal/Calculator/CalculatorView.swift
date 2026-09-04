@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct CalculatorView: View {
+    @Environment(\.horizontalSizeClass) private var sizeClass
     @EnvironmentObject private var store: CalculatorStore
     @State private var input = ""
     @State private var livePreview: CalculatorPreview?
@@ -17,22 +18,33 @@ struct CalculatorView: View {
     @State private var rowFrames: [UUID: CGRect] = [:]
     @FocusState private var inputFocused: Bool
 
+    private var isCompact: Bool { AppLayout.isCompact(sizeClass) }
+
     var body: some View {
-        VStack(spacing: 0) {
-            ZStack(alignment: .trailing) {
+        Group {
+            if isCompact {
                 historyPane
-                    .padding(.trailing, showingVariables ? AppDesign.inspectorWidth + 8 : 0)
-                if showingVariables {
-                    Color.clear
-                        .contentShape(Rectangle())
-                        .onTapGesture { showingVariables = false }
-                    VariableInspector(showingEditor: $showingVariableEditor)
-                        .environmentObject(store)
-                        .padding(12)
-                        .transition(.move(edge: .trailing).combined(with: .opacity))
+                    .safeAreaInset(edge: .bottom, spacing: 0) {
+                        composer
+                    }
+            } else {
+                VStack(spacing: 0) {
+                    ZStack(alignment: .trailing) {
+                        historyPane
+                            .padding(.trailing, showingVariables ? AppDesign.inspectorWidth + 8 : 0)
+                        if showingVariables {
+                            Color.clear
+                                .contentShape(Rectangle())
+                                .onTapGesture { showingVariables = false }
+                            VariableInspector(showingEditor: $showingVariableEditor)
+                                .environmentObject(store)
+                                .padding(12)
+                                .transition(.move(edge: .trailing).combined(with: .opacity))
+                        }
+                    }
+                    composer
                 }
             }
-            composer
         }
         .background(AppDesign.canvas)
         .animation(.easeOut(duration: 0.18), value: showingVariables)
@@ -50,17 +62,41 @@ struct CalculatorView: View {
             VariableManager()
                 .environmentObject(store)
         }
+        .sheet(isPresented: compactVariablesBinding) {
+            NavigationStack {
+                VariableInspector(showingEditor: $showingVariableEditor, usesSheetChrome: true)
+                    .environmentObject(store)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("完成") { showingVariables = false }
+                        }
+                    }
+            }
+            #if os(iOS)
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
+            #endif
+        }
         .onReceive(NotificationCenter.default.publisher(for: .focusCalculatorInput)) { _ in
             inputFocused = true
         }
         .onAppear {
+            #if os(macOS)
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
                 inputFocused = true
             }
+            #endif
         }
-        .onExitCommand {
+        .macOSExitCommand {
             if showingVariables { showingVariables = false }
         }
+    }
+
+    private var compactVariablesBinding: Binding<Bool> {
+        Binding(
+            get: { isCompact && showingVariables },
+            set: { if !$0 { showingVariables = false } }
+        )
     }
 
     private var historyPane: some View {
@@ -72,7 +108,7 @@ struct CalculatorView: View {
                             inputFocused = true
                         }
                         .frame(maxWidth: .infinity)
-                        .padding(.top, 120)
+                        .padding(.top, isCompact ? 72 : 120)
                     } else {
                         VStack(alignment: .leading, spacing: 0) {
                             ForEach(store.lines) { line in
@@ -109,8 +145,8 @@ struct CalculatorView: View {
                                 }
                             }
                         }
-                        .padding(.horizontal, 20)
-                        .padding(.top, 18)
+                        .padding(.horizontal, isCompact ? 12 : 20)
+                        .padding(.top, isCompact ? 12 : 18)
                         .padding(.bottom, 8)
                         .onPreferenceChange(HistoryRowFrameKey.self) { frames in
                             guard draggingLineID == nil else { return }
@@ -120,6 +156,7 @@ struct CalculatorView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .scrollDismissesKeyboard(.interactively)
             .onChange(of: store.lines.count) { _, _ in
                 if let first = store.lines.first { withAnimation { proxy.scrollTo(first.id, anchor: .top) } }
             }
@@ -134,47 +171,29 @@ struct CalculatorView: View {
                     .foregroundStyle(.red)
                     .padding(.horizontal, 4)
             }
-            HStack(spacing: 10) {
-                TextField("直接输入计算公式，比如: 5 * (7 + 8)", text: $input, axis: .vertical)
-                    .font(.system(size: 15, design: .monospaced))
-                    .textFieldStyle(.plain)
-                    .focused($inputFocused)
-                    .lineLimit(1...4)
-                    .onSubmit { submit() }
-                if let livePreview {
-                    Text(previewLabel(livePreview))
-                        .font(.system(size: 13.5, weight: .medium, design: .monospaced))
-                        .foregroundStyle(AppDesign.preview)
-                        .textSelection(.enabled)
+            Group {
+                if isCompact {
+                    VStack(alignment: .leading, spacing: 8) {
+                        inputField
+                        HStack(spacing: 10) {
+                            previewLabelView
+                            Spacer(minLength: 8)
+                            variablesButton
+                            submitButton
+                        }
+                    }
+                } else {
+                    HStack(spacing: 10) {
+                        inputField
+                        previewLabelView
+                        variablesButton
+                        submitButton
+                    }
                 }
-                Button {
-                    showingVariables.toggle()
-                } label: {
-                    Text("变量")
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(showingVariables ? AppDesign.ink : AppDesign.muted)
-                        .padding(.horizontal, 9)
-                        .padding(.vertical, 6)
-                        .background(
-                            RoundedRectangle(cornerRadius: AppDesign.iconRadius, style: .continuous)
-                                .fill(showingVariables ? AppDesign.iconSelected : Color.black.opacity(0.045))
-                        )
-                }
-                .buttonStyle(.plain)
-                .help("变量")
-                Button(action: submit) {
-                    Image(systemName: "return")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .frame(width: 28, height: 28)
-                        .background(AppDesign.ink, in: RoundedRectangle(cornerRadius: AppDesign.iconRadius, style: .continuous))
-                }
-                .buttonStyle(.plain)
-                .help("保存")
             }
-            .padding(.leading, 16)
+            .padding(.leading, isCompact ? 14 : 16)
             .padding(.trailing, 8)
-            .padding(.vertical, 10)
+            .padding(.vertical, isCompact ? 12 : 10)
             .background(AppDesign.paper, in: RoundedRectangle(cornerRadius: AppDesign.composerRadius, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: AppDesign.composerRadius, style: .continuous)
@@ -185,9 +204,59 @@ struct CalculatorView: View {
                 livePreview = store.previewEvaluation(newValue)
             }
         }
-        .padding(.horizontal, 18)
-        .padding(.bottom, 16)
+        .padding(.horizontal, isCompact ? 12 : 18)
+        .padding(.bottom, isCompact ? 10 : 16)
         .padding(.top, 4)
+    }
+
+    private var inputField: some View {
+        TextField("直接输入计算公式，比如: 5 * (7 + 8)", text: $input, axis: .vertical)
+            .font(.system(size: 15, design: .monospaced))
+            .textFieldStyle(.plain)
+            .focused($inputFocused)
+            .lineLimit(1...4)
+            .formulaKeyboard()
+            .onSubmit { submit() }
+    }
+
+    @ViewBuilder
+    private var previewLabelView: some View {
+        if let livePreview {
+            Text(previewLabel(livePreview))
+                .font(.system(size: 13.5, weight: .medium, design: .monospaced))
+                .foregroundStyle(AppDesign.preview)
+                .textSelection(.enabled)
+        }
+    }
+
+    private var variablesButton: some View {
+        Button {
+            showingVariables.toggle()
+        } label: {
+            Text("变量")
+                .font(.system(size: 11.5))
+                .foregroundStyle(showingVariables ? AppDesign.ink : AppDesign.muted)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 6)
+                .background(
+                    RoundedRectangle(cornerRadius: AppDesign.iconRadius, style: .continuous)
+                        .fill(showingVariables ? AppDesign.iconSelected : Color.black.opacity(0.045))
+                )
+        }
+        .buttonStyle(.plain)
+        .help("变量")
+    }
+
+    private var submitButton: some View {
+        Button(action: submit) {
+            Image(systemName: "return")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 28, height: 28)
+                .background(AppDesign.ink, in: RoundedRectangle(cornerRadius: AppDesign.iconRadius, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .help("保存")
     }
 
     private func previewLabel(_ preview: CalculatorPreview) -> String {
@@ -313,9 +382,14 @@ private struct CalculatorLineRow: View {
     let onSaveVariable: () -> Void
     let onDelete: () -> Void
     let onReorderDrag: (DragGesture.Value?) -> Void
+    @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var draftExpression: String
     @State private var editError = ""
     @State private var isHovering = false
+    @State private var isEditingExpression = false
+    @FocusState private var expressionFocused: Bool
+
+    private var isCompact: Bool { AppLayout.isCompact(sizeClass) }
 
     init(
         line: CalculatorLine,
@@ -362,44 +436,31 @@ private struct CalculatorLineRow: View {
                         )
                 }
                 .frame(width: 20, height: 28)
-                .opacity(isHovering || isDragging ? 1 : 0)
+                .opacity(isCompact || isHovering || isDragging ? 1 : 0)
                 .help("拖拽排序")
 
-                TextField("输入公式", text: $draftExpression, axis: .vertical)
-                    .font(.system(size: 14, design: .monospaced))
-                    .foregroundStyle(AppDesign.secondary)
-                    .textFieldStyle(.plain)
-                    .lineLimit(1...3)
-                    .onChange(of: draftExpression) { _, newValue in
-                        if onEdit(newValue) {
-                            editError = ""
-                        } else if !newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                            editError = "公式暂时无法计算"
-                        }
-                    }
-                    .onChange(of: line.expression) { _, newValue in
-                        if draftExpression != newValue { draftExpression = newValue }
-                    }
-                    .textSelection(.enabled)
+                expressionEditor
 
                 Spacer(minLength: 12)
 
                 HStack(spacing: 4) {
-                    HStack(spacing: 4) {
-                        AppIconButton(
-                            systemName: line.isPinned ? "pin.fill" : "pin",
-                            help: line.isPinned ? "取消置顶" : "置顶",
-                            tint: line.isPinned ? AppDesign.ink : AppDesign.muted,
-                            showsHoverCaption: true,
-                            action: onPin
-                        )
-                        AppIconButton(systemName: "square.and.pencil", help: "备注", showsHoverCaption: true, action: onAlias)
-                        AppIconButton(systemName: "equal", help: "存为变量", showsHoverCaption: true, action: onSaveVariable)
-                        AppIconButton(systemName: "trash", help: "删除", showsHoverCaption: true, action: onDelete)
+                    if !isCompact {
+                        HStack(spacing: 4) {
+                            AppIconButton(
+                                systemName: line.isPinned ? "pin.fill" : "pin",
+                                help: line.isPinned ? "取消置顶" : "置顶",
+                                tint: line.isPinned ? AppDesign.ink : AppDesign.muted,
+                                showsHoverCaption: true,
+                                action: onPin
+                            )
+                            AppIconButton(systemName: "square.and.pencil", help: "备注", showsHoverCaption: true, action: onAlias)
+                            AppIconButton(systemName: "equal", help: "存为变量", showsHoverCaption: true, action: onSaveVariable)
+                            AppIconButton(systemName: "trash", help: "删除", showsHoverCaption: true, action: onDelete)
+                        }
+                        .opacity(isHovering || isSelected ? 1 : 0)
+                        .allowsHitTesting(isHovering || isSelected)
+                        .zIndex(1)
                     }
-                    .opacity(isHovering || isSelected ? 1 : 0)
-                    .allowsHitTesting(isHovering || isSelected)
-                    .zIndex(1)
 
                     Text(NumberDisplay.string(line.result))
                         .font(.system(size: 15, weight: .medium, design: .monospaced))
@@ -440,7 +501,77 @@ private struct CalculatorLineRow: View {
         .shadow(color: isDragging ? Color.black.opacity(0.10) : .clear, radius: 12, y: 6)
         .contentShape(Rectangle())
         .onTapGesture(perform: onSelect)
+        .contextMenu { lineActionsMenu }
+        .onChange(of: line.expression) { _, newValue in
+            if draftExpression != newValue { draftExpression = newValue }
+        }
         .onHover { isHovering = $0 }
+    }
+
+    @ViewBuilder
+    private var expressionEditor: some View {
+        if isCompact && !isEditingExpression {
+            Text(draftExpression)
+                .font(.system(size: 14, design: .monospaced))
+                .foregroundStyle(AppDesign.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    isEditingExpression = true
+                    expressionFocused = true
+                }
+        } else {
+            TextField("输入公式", text: $draftExpression, axis: .vertical)
+                .font(.system(size: 14, design: .monospaced))
+                .foregroundStyle(AppDesign.secondary)
+                .textFieldStyle(.plain)
+                .lineLimit(1...3)
+                .formulaKeyboard()
+                .focused($expressionFocused)
+                .onChange(of: draftExpression) { _, newValue in
+                    applyDraft(newValue)
+                }
+                .onChange(of: line.expression) { _, newValue in
+                    if draftExpression != newValue { draftExpression = newValue }
+                }
+                .onChange(of: expressionFocused) { _, focused in
+                    if !focused { isEditingExpression = false }
+                }
+                .textSelection(.enabled)
+        }
+    }
+
+    @ViewBuilder
+    private var lineActionsMenu: some View {
+        Button {
+            onPin()
+        } label: {
+            Label(line.isPinned ? "取消置顶" : "置顶", systemImage: line.isPinned ? "pin.slash" : "pin")
+        }
+        Button {
+            onAlias()
+        } label: {
+            Label("备注", systemImage: "square.and.pencil")
+        }
+        Button {
+            onSaveVariable()
+        } label: {
+            Label("存为变量", systemImage: "equal")
+        }
+        Divider()
+        Button(role: .destructive) {
+            onDelete()
+        } label: {
+            Label("删除", systemImage: "trash")
+        }
+    }
+
+    private func applyDraft(_ newValue: String) {
+        if onEdit(newValue) {
+            editError = ""
+        } else if !newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            editError = "公式暂时无法计算"
+        }
     }
 }
 
@@ -459,8 +590,70 @@ private struct EmptyCalculatorState: View {
 struct VariableInspector: View {
     @EnvironmentObject private var store: CalculatorStore
     @Binding var showingEditor: Bool
+    var usesSheetChrome = false
 
     var body: some View {
+        if usesSheetChrome {
+            phoneInspector
+        } else {
+            desktopInspector
+        }
+    }
+
+    private var phoneInspector: some View {
+        List {
+            if store.variables.isEmpty {
+                Text("公式里直接写名字即可引用")
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(store.variables) { variable in
+                    HStack {
+                        Text(variable.name)
+                            .font(.system(.body, design: .monospaced))
+                        Spacer()
+                        Text(NumberDisplay.string(variable.value))
+                            .font(.system(.body, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                    }
+                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                        Button("删除", role: .destructive) {
+                            store.deleteVariable(variable)
+                        }
+                        Button("复制") {
+                            Clipboard.copy(variable.name)
+                        }
+                    }
+                    .contextMenu {
+                        Button {
+                            Clipboard.copy(variable.name)
+                        } label: {
+                            Label("复制变量名", systemImage: "doc.on.doc")
+                        }
+                        Button(role: .destructive) {
+                            store.deleteVariable(variable)
+                        } label: {
+                            Label("删除", systemImage: "trash")
+                        }
+                    }
+                }
+            }
+        }
+        .navigationTitle("变量")
+        #if os(iOS)
+        .navigationBarTitleDisplayMode(.inline)
+        #endif
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    showingEditor = true
+                } label: {
+                    Image(systemName: "plus")
+                }
+            }
+        }
+    }
+
+    private var desktopInspector: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
                 Text("变量")

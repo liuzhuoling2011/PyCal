@@ -1,6 +1,9 @@
+#if os(macOS)
 import AppKit
+#endif
 import SwiftUI
 
+#if os(macOS)
 final class PyCalAppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
@@ -11,20 +14,28 @@ final class PyCalAppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 }
+#endif
 
 @main
 struct PyCalApp: App {
+    #if os(macOS)
     @NSApplicationDelegateAdaptor(PyCalAppDelegate.self) private var appDelegate
+    #endif
     @StateObject private var calculatorStore = CalculatorStore()
 
     var body: some Scene {
         WindowGroup {
             AppShellView()
                 .environmentObject(calculatorStore)
+                .preferredColorScheme(.light)
+                #if os(macOS)
                 .frame(minWidth: 900, minHeight: 600)
+                #endif
         }
+        #if os(macOS)
         .defaultSize(width: 1080, height: 720)
         .windowStyle(.hiddenTitleBar)
+        #endif
         .commands {
             CommandGroup(replacing: .newItem) {
                 Button("新建计算行") {
@@ -34,6 +45,12 @@ struct PyCalApp: App {
             }
         }
     }
+}
+
+private enum CompactTab: Hashable {
+    case calculator
+    case timeConverter
+    case settings
 }
 
 enum ToolboxItem: String, CaseIterable, Identifiable {
@@ -58,11 +75,64 @@ enum ToolboxItem: String, CaseIterable, Identifiable {
 }
 
 struct AppShellView: View {
+    @Environment(\.horizontalSizeClass) private var sizeClass
     @EnvironmentObject private var calculatorStore: CalculatorStore
     @State private var selection: ToolboxItem = .calculator
+    @State private var compactTab: CompactTab = .calculator
     @State private var showingSettings = false
 
+    private var isCompact: Bool { AppLayout.isCompact(sizeClass) }
+
     var body: some View {
+        Group {
+            if isCompact {
+                compactShell
+            } else {
+                regularShell
+            }
+        }
+        .background(AppDesign.canvas)
+        .preferredColorScheme(.light)
+        .overlay {
+            if showingSettings, !isCompact {
+                SettingsModal {
+                    showingSettings = false
+                }
+                .environmentObject(calculatorStore)
+            }
+        }
+        .animation(.easeOut(duration: 0.16), value: showingSettings)
+        .macOSExitCommand {
+            if showingSettings { showingSettings = false }
+        }
+    }
+
+    private var compactShell: some View {
+        TabView(selection: $compactTab) {
+            CalculatorView()
+                .tabItem {
+                    Label(ToolboxItem.calculator.title, systemImage: ToolboxItem.calculator.symbol)
+                }
+                .tag(CompactTab.calculator)
+
+            TimeConverterView()
+                .tabItem {
+                    Label(ToolboxItem.timeConverter.title, systemImage: ToolboxItem.timeConverter.symbol)
+                }
+                .tag(CompactTab.timeConverter)
+
+            NavigationStack {
+                SettingsPage()
+            }
+            .tabItem {
+                Label("设置", systemImage: "gearshape")
+            }
+            .tag(CompactTab.settings)
+        }
+        .tint(AppDesign.ink)
+    }
+
+    private var regularShell: some View {
         HStack(spacing: 0) {
             AppIconRail(selection: $selection, showingSettings: $showingSettings)
             Group {
@@ -77,18 +147,6 @@ struct AppShellView: View {
             .background(AppDesign.canvas)
         }
         .background(AppDesign.canvas)
-        .overlay {
-            if showingSettings {
-                SettingsModal {
-                    showingSettings = false
-                }
-                .environmentObject(calculatorStore)
-            }
-        }
-        .animation(.easeOut(duration: 0.16), value: showingSettings)
-        .onExitCommand {
-            if showingSettings { showingSettings = false }
-        }
     }
 }
 
@@ -116,7 +174,11 @@ private struct AppIconRail: View {
                 showingSettings.toggle()
             }
         }
+        #if os(macOS)
         .padding(.top, 42)
+        #else
+        .padding(.top, 16)
+        #endif
         .padding(.horizontal, 10)
         .padding(.bottom, 12)
         .frame(width: AppDesign.railWidth)
