@@ -14,6 +14,12 @@ final class TimeConverterTests: XCTestCase {
         store.unit = .milliseconds
         store.convertDateToTimestamp()
         XCTAssertEqual(store.dateOutput, "1735790147250")
+
+        store.unit = .nanoseconds
+        store.convertDateToTimestamp()
+        XCTAssertFalse(store.dateOutput.contains(","))
+        XCTAssertFalse(store.dateOutput.contains(" "))
+        XCTAssertTrue(store.dateOutput.allSatisfy(\.isNumber))
     }
 
     func testTimestampToDateUsesSelectedTimezone() {

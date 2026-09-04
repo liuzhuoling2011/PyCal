@@ -5,50 +5,63 @@ struct TimeConverterView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            TimeConverterToolbar(store: store)
-            Divider()
-            ScrollView {
-                VStack(spacing: 0) {
-                    HStack(alignment: .top, spacing: 0) {
-                        DateToTimestampCard(store: store)
-                            .frame(maxWidth: .infinity)
-                        TimestampToDateCard(store: store)
-                            .frame(maxWidth: .infinity)
-                    }
-                    LiveTimestampCard(store: store)
-                }
-                .frame(maxWidth: .infinity)
-                .padding(0)
+            HStack(spacing: 16) {
+                Spacer()
+                UnitSegment(store: store)
+                TimezonePicker(store: store)
             }
-            .background(AppDesign.pageBackground)
+            .padding(.horizontal, 28)
+            .padding(.top, 16)
+            .padding(.bottom, 4)
+
+            HStack(alignment: .top, spacing: 0) {
+                DateColumn(store: store)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Rectangle()
+                    .fill(AppDesign.hairline)
+                    .frame(width: 1)
+                    .padding(.vertical, 8)
+                TimestampColumn(store: store)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+
+            LiveTimestampBar(store: store)
         }
-        .background(AppDesign.pageBackground)
+        .background(AppDesign.canvas)
+        .onAppear {
+            store.syncDateInput()
+            store.convertDateToTimestamp()
+        }
     }
 }
 
-private struct TimeConverterToolbar: View {
+private struct UnitSegment: View {
     @ObservedObject var store: TimeConverterStore
 
     var body: some View {
-        HStack(spacing: 3) {
-            Spacer()
-            Picker("", selection: $store.unit) {
-                ForEach(TimestampUnit.allCases) { unit in
-                    Text(unit.rawValue).tag(unit)
+        HStack(spacing: 2) {
+            ForEach(TimestampUnit.allCases) { unit in
+                Button(unit.symbol) {
+                    store.unit = unit
+                    store.convertDateToTimestamp()
+                    if !store.timestampInput.isEmpty { store.convertTimestampToDate() }
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: 12, weight: .medium, design: .monospaced))
+                .foregroundStyle(store.unit == unit ? AppDesign.ink : AppDesign.muted)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 4)
+                .background {
+                    if store.unit == unit {
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(AppDesign.paper)
+                    }
                 }
             }
-            .labelsHidden()
-            .pickerStyle(.segmented)
-            .frame(width: 200)
-            .onChange(of: store.unit) { _, _ in
-                store.convertDateToTimestamp()
-                if !store.timestampInput.isEmpty { store.convertTimestampToDate() }
-            }
-            TimezonePicker(store: store)
         }
-        .padding(.horizontal, 28)
-        .padding(.top, 31)
-        .padding(.bottom, 9)
+        .padding(3)
+        .background(Color.black.opacity(0.045), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 }
 
@@ -73,16 +86,17 @@ private struct TimezonePicker: View {
                 store.setTimezone(TimeZone.current.identifier)
             }
         } label: {
-            HStack(spacing: 9) {
-                Image(systemName: "globe.asia.australia")
+            HStack(spacing: 6) {
                 Text(timezoneLabel)
                     .lineLimit(1)
                 Image(systemName: "chevron.down")
-                    .font(.caption.weight(.bold))
+                    .font(.system(size: 8, weight: .semibold))
             }
-            .frame(width: 190, alignment: .leading)
+            .font(.system(size: 12.5))
+            .foregroundStyle(AppDesign.muted)
         }
-        .menuStyle(.borderedButton)
+        .menuStyle(.borderlessButton)
+        .fixedSize()
     }
 
     private var timezoneLabel: String {
@@ -91,187 +105,134 @@ private struct TimezonePicker: View {
     }
 }
 
-private struct DateToTimestampCard: View {
+private struct DateColumn: View {
     @ObservedObject var store: TimeConverterStore
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 15) {
-            HStack(alignment: .firstTextBaseline) {
-                Label("日期 → 时间戳", systemImage: "arrow.right")
-                    .font(.system(size: 14, weight: .semibold))
-                Text(store.timezone.abbreviation() ?? store.timezoneIdentifier)
-                    .font(.system(size: 10, weight: .medium, design: .monospaced))
-                    .foregroundStyle(AppDesign.accent)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 3)
-                    .background(AppDesign.accent.opacity(0.10), in: Capsule())
-                Spacer()
-                Menu {
-                    Button("此刻", systemImage: "clock") { store.setDateToNow() }
-                    Button("零点", systemImage: "hourglass") {
-                        var calendar = Calendar(identifier: .gregorian)
-                        calendar.timeZone = store.timezone
-                        store.dateValue = calendar.startOfDay(for: store.dateValue)
-                        store.syncDateInput()
-                        store.convertDateToTimestamp()
-                    }
-                    Button("每日末", systemImage: "hourglass.bottomhalf.fill") { store.setDateToEndOfDay() }
-                } label: {
-                    Image(systemName: "ellipsis.circle")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 28, height: 28)
-                }
-                .menuStyle(.borderlessButton)
-            }
-            Text("日期时间")
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.tertiary)
+        VStack(alignment: .leading, spacing: 0) {
+            Text("日期")
+                .font(.system(size: 11))
+                .foregroundStyle(AppDesign.muted)
+                .padding(.bottom, 10)
             TextField("YYYY-MM-DD HH:mm:ss", text: $store.dateInput)
                 .textFieldStyle(.plain)
-                .font(.system(size: 15, design: .monospaced))
+                .font(.system(size: 16, design: .monospaced))
+                .foregroundStyle(AppDesign.ink)
                 .onChange(of: store.dateInput) { _, _ in store.convertDateInput(showError: false) }
                 .onSubmit { store.convertDateInput() }
-                .padding(.horizontal, 12)
-                .frame(height: 43)
-                .background(AppDesign.inputBackground, in: Rectangle())
-                .overlay {
-                    Rectangle()
-                        .stroke(AppDesign.hairline, lineWidth: 1)
+                .padding(.bottom, 11)
+                .overlay(alignment: .bottom) {
+                    Rectangle().fill(AppDesign.composerBorder).frame(height: 1)
                 }
-            ResultField(value: store.dateOutput.isEmpty ? "点击日期或输入后换算" : store.dateOutput, accent: AppDesign.accent) {
-                Clipboard.copy(store.dateOutput)
+            Text(store.dateOutput.isEmpty ? " " : store.dateOutput)
+                .font(.system(size: 22, weight: .medium, design: .monospaced))
+                .foregroundStyle(AppDesign.ink)
+                .textSelection(.enabled)
+                .padding(.top, 18)
+            HStack(spacing: 12) {
+                QuietTextButton(title: "此刻") { store.setDateToNow() }
+                QuietTextButton(title: "零点") { setStartOfDay() }
+                QuietTextButton(title: "每日末") { store.setDateToEndOfDay() }
+                if !store.dateOutput.isEmpty {
+                    QuietTextButton(title: "复制") { Clipboard.copy(store.dateOutput) }
+                }
             }
+            .padding(.top, 10)
             if let error = store.dateError {
-                Text(error).font(.system(size: 11)).foregroundStyle(.red)
+                Text(error).font(.system(size: 11)).foregroundStyle(.red).padding(.top, 8)
             }
         }
-        .padding(18)
-        .appCard()
-        .onAppear {
-            store.syncDateInput()
-            store.convertDateToTimestamp()
-        }
+        .padding(.horizontal, 28)
+        .padding(.top, 18)
+    }
+
+    private func setStartOfDay() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = store.timezone
+        store.dateValue = calendar.startOfDay(for: store.dateValue)
+        store.syncDateInput()
+        store.convertDateToTimestamp()
     }
 }
 
-private struct TimestampToDateCard: View {
+private struct TimestampColumn: View {
     @ObservedObject var store: TimeConverterStore
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 15) {
-            HStack(alignment: .firstTextBaseline) {
-                Label("时间戳 → 日期", systemImage: "arrow.right")
-                    .font(.system(size: 14, weight: .semibold))
-                Text(store.timezone.abbreviation() ?? store.timezoneIdentifier)
-                    .font(.system(size: 10, weight: .medium, design: .monospaced))
-                    .foregroundStyle(AppDesign.accent)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 3)
-                    .background(AppDesign.accent.opacity(0.10), in: Capsule())
-                Spacer()
-                AppIconButton(systemName: "clock.arrow.circlepath", help: "使用当前时间戳") {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Unix 时间戳")
+                .font(.system(size: 11))
+                .foregroundStyle(AppDesign.muted)
+                .padding(.bottom, 10)
+            TextField("输入时间戳", text: $store.timestampInput)
+                .textFieldStyle(.plain)
+                .font(.system(size: 16, design: .monospaced))
+                .foregroundStyle(AppDesign.ink)
+                .onChange(of: store.timestampInput) { _, _ in store.convertTimestampToDate(showError: false) }
+                .onSubmit { store.convertTimestampToDate() }
+                .padding(.bottom, 11)
+                .overlay(alignment: .bottom) {
+                    Rectangle().fill(AppDesign.composerBorder).frame(height: 1)
+                }
+            Text(store.timestampOutput.isEmpty ? " " : store.timestampOutput)
+                .font(.system(size: 22, weight: .medium, design: .monospaced))
+                .foregroundStyle(AppDesign.ink)
+                .textSelection(.enabled)
+                .padding(.top, 18)
+            HStack(spacing: 12) {
+                QuietTextButton(title: "使用当前") {
                     store.timestampInput = store.currentTimestamp
                     store.convertTimestampToDate()
                 }
-            }
-            Text("Unix 时间戳（\(store.unit.symbol)）")
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.tertiary)
-            TextField("输入时间戳", text: $store.timestampInput)
-                .textFieldStyle(.plain)
-                .font(.system(size: 15, design: .monospaced))
-                .onChange(of: store.timestampInput) { _, _ in store.convertTimestampToDate(showError: false) }
-                .onSubmit { store.convertTimestampToDate() }
-                .padding(.horizontal, 12)
-                .frame(height: 43)
-                .background(AppDesign.inputBackground, in: Rectangle())
-                .overlay {
-                    Rectangle()
-                        .stroke(AppDesign.hairline, lineWidth: 1)
+                if !store.timestampOutput.isEmpty {
+                    QuietTextButton(title: "复制") { Clipboard.copy(store.timestampOutput) }
                 }
-            ResultField(value: store.timestampOutput.isEmpty ? "换算结果将在这里显示" : store.timestampOutput, accent: AppDesign.accent) {
-                Clipboard.copy(store.timestampOutput)
             }
+            .padding(.top, 10)
             if let error = store.timestampError {
-                Text(error).font(.system(size: 11)).foregroundStyle(.red)
+                Text(error).font(.system(size: 11)).foregroundStyle(.red).padding(.top, 8)
             }
         }
-        .padding(18)
-        .appCard()
+        .padding(.horizontal, 28)
+        .padding(.top, 18)
     }
 }
 
-private struct LiveTimestampCard: View {
+private struct LiveTimestampBar: View {
     @ObservedObject var store: TimeConverterStore
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: store.unit == .nanoseconds ? 0.1 : 1)) { context in
             let liveDate = store.isPaused ? store.pausedDate : context.date
-            VStack(alignment: .leading, spacing: 15) {
-                HStack(alignment: .firstTextBaseline) {
-                    Label("当前时间戳", systemImage: "dot.radiowaves.left.and.right")
-                        .font(.system(size: 14, weight: .semibold))
-                    Spacer()
-                    Text(store.currentDateString)
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(.tertiary)
-                }
-                HStack(alignment: .center) {
-                    Text(store.timestampString(for: liveDate))
-                        .font(.system(size: 32, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(AppDesign.accent)
-                        .textSelection(.enabled)
-                    Spacer()
-                    AppIconButton(systemName: "doc.on.doc", help: "复制") {
-                        Clipboard.copy(store.timestampString(for: liveDate))
-                    }
-                    AppIconButton(
-                        systemName: store.isPaused ? "play.fill" : "pause.fill",
-                        help: store.isPaused ? "继续" : "暂停",
-                        tint: .white,
-                        isProminent: true
-                    ) {
-                        store.togglePause()
-                    }
-                    AppIconButton(systemName: "arrow.counterclockwise", help: "重置") {
-                        store.resetLiveClock()
-                    }
-                }
+            HStack(spacing: 14) {
                 HStack(spacing: 6) {
                     Circle()
-                        .fill(store.isPaused ? .orange : AppDesign.accent)
-                        .frame(width: 7, height: 7)
-                    Text(store.isPaused ? "已暂停在当前时刻" : "实时更新中")
-                        .font(.system(size: 11))
+                        .fill(store.isPaused ? Color.orange : AppDesign.preview)
+                        .frame(width: 6, height: 6)
+                    Text(store.isPaused ? "已暂停" : "实时")
+                        .font(.system(size: 12.5))
                         .foregroundStyle(AppDesign.muted)
                 }
+                Text(store.timestampString(for: liveDate))
+                    .font(.system(size: 13.5, design: .monospaced))
+                    .foregroundStyle(AppDesign.ink)
+                    .textSelection(.enabled)
+                Spacer()
+                QuietTextButton(title: "复制") {
+                    Clipboard.copy(store.timestampString(for: liveDate))
+                }
+                QuietTextButton(title: store.isPaused ? "继续" : "暂停") {
+                    store.togglePause()
+                }
+                QuietTextButton(title: "重置") {
+                    store.resetLiveClock()
+                }
             }
-            .padding(18)
-            .appCard()
-        }
-    }
-}
-
-private struct ResultField: View {
-    let value: String
-    let accent: Color
-    let copy: () -> Void
-
-    var body: some View {
-        HStack(spacing: 10) {
-            Text(value)
-                .font(.system(size: 15, design: .monospaced))
-                .foregroundStyle(value.hasPrefix("点击") || value.hasPrefix("换算") ? .secondary : accent)
-                .lineLimit(1)
-                .textSelection(.enabled)
-            Spacer(minLength: 4)
-            if !value.hasPrefix("点击") && !value.hasPrefix("换算") {
-                AppIconButton(systemName: "doc.on.doc", help: "复制", action: copy)
+            .padding(.horizontal, 28)
+            .padding(.vertical, 14)
+            .overlay(alignment: .top) {
+                Rectangle().fill(AppDesign.hairline).frame(height: 1)
             }
         }
-        .padding(.horizontal, 14)
-        .frame(maxWidth: .infinity, minHeight: 43, alignment: .leading)
-        .background(Color.primary.opacity(0.04), in: Rectangle())
     }
 }

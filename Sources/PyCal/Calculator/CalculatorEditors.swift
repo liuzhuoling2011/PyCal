@@ -29,6 +29,7 @@ struct AliasEditor: View {
                     .keyboardShortcut(.escape)
                 Button("保存", action: save)
                     .buttonStyle(.borderedProminent)
+                    .tint(AppDesign.ink)
                     .keyboardShortcut(.return)
             }
         }
@@ -85,6 +86,7 @@ struct VariableEditor: View {
                     .keyboardShortcut(.escape)
                 Button("保存", action: save)
                     .buttonStyle(.borderedProminent)
+                    .tint(AppDesign.ink)
                     .keyboardShortcut(.return)
             }
         }
@@ -123,7 +125,7 @@ struct VariableManager: View {
                 TextField("数值", text: $value)
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 100)
-                AppIconButton(systemName: "plus.circle.fill", help: "添加变量", tint: AppDesign.accent) {
+                AppIconButton(systemName: "plus", help: "添加变量", tint: AppDesign.ink) {
                     guard let number = Double(value), store.upsertVariable(name: name, value: number) else {
                         error = "变量名或数值无效"
                         return
@@ -173,59 +175,106 @@ struct VariableManager: View {
 struct VariableRow: View {
     @EnvironmentObject private var store: CalculatorStore
     let variable: CalculatorVariable
+    @State private var isHovering = false
 
     var body: some View {
         HStack(spacing: 8) {
             Text(variable.name)
-                .font(.system(.callout, design: .monospaced))
+                .font(.system(size: 12.5, design: .monospaced))
+                .foregroundStyle(AppDesign.secondary)
                 .lineLimit(1)
             Spacer()
-            Text(NumberDisplay.string(variable.value))
-                .font(.system(.callout, design: .monospaced))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-            Menu {
-                Button("复制变量名") { Clipboard.copy(variable.name) }
-                Button("删除变量", role: .destructive) { store.deleteVariable(variable) }
-            } label: {
-                Image(systemName: "ellipsis.circle")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(.tertiary)
-                    .frame(width: 28, height: 28)
+            if isHovering {
+                AppIconButton(systemName: "doc.on.doc", help: "复制变量名") {
+                    Clipboard.copy(variable.name)
+                }
+                AppIconButton(systemName: "trash", help: "删除变量", tint: .red) {
+                    store.deleteVariable(variable)
+                }
             }
-            .menuStyle(.borderlessButton)
+            Text(NumberDisplay.string(variable.value))
+                .font(.system(size: 12.5, design: .monospaced))
+                .foregroundStyle(AppDesign.muted)
+                .lineLimit(1)
         }
-        .padding(.horizontal, 9)
         .padding(.vertical, 8)
-        .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(AppDesign.hairline)
+                .frame(height: 1)
+        }
+        .onHover { isHovering = $0 }
     }
 }
 
-struct CalculatorSettings: View {
+struct SettingsModal: View {
     @EnvironmentObject private var store: CalculatorStore
+    let onDismiss: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("计算器设置")
-                .font(.headline)
-            Stepper(value: Binding(
-                get: { store.historyLimit },
-                set: { store.updateHistoryLimit($0) }
-            ), in: 10...500, step: 10) {
+        ZStack {
+            Color.black.opacity(0.18)
+                .ignoresSafeArea()
+                .onTapGesture(perform: onDismiss)
+
+            VStack(alignment: .leading, spacing: 16) {
                 HStack {
-                    Text("保存历史行数")
+                    Text("设置")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(AppDesign.ink)
                     Spacer()
-                    Text("\(store.historyLimit)")
-                        .foregroundStyle(.secondary)
+                    Button(action: onDismiss) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(AppDesign.muted)
+                            .frame(width: 24, height: 24)
+                            .background(AppDesign.iconSelected, in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("关闭")
+                    .keyboardShortcut(.cancelAction)
+                }
+
+                Stepper(value: Binding(
+                    get: { store.historyLimit },
+                    set: { store.updateHistoryLimit($0) }
+                ), in: 10...500, step: 10) {
+                    HStack {
+                        Text("保存历史行数")
+                        Spacer()
+                        Text("\(store.historyLimit)")
+                            .foregroundStyle(AppDesign.muted)
+                    }
+                }
+                .font(.system(size: 13))
+
+                Text("置顶记录不会被普通历史清理。")
+                    .font(.system(size: 12))
+                    .foregroundStyle(AppDesign.muted)
+
+                Divider().overlay(AppDesign.hairline)
+
+                Button("清除未置顶历史", role: .destructive) {
+                    store.clearUnpinnedHistory()
+                }
+                .font(.system(size: 13))
+
+                HStack {
+                    Spacer()
+                    Button("完成", action: onDismiss)
+                        .buttonStyle(.borderedProminent)
+                        .tint(AppDesign.ink)
+                        .keyboardShortcut(.defaultAction)
                 }
             }
-            Text("置顶记录不会被普通历史清理。")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Divider()
-            Button("清除未置顶历史", role: .destructive) {
-                store.clearUnpinnedHistory()
+            .padding(22)
+            .frame(width: 360)
+            .background(AppDesign.paper, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(AppDesign.hairline, lineWidth: 1)
             }
+            .shadow(color: Color.black.opacity(0.12), radius: 24, y: 10)
         }
     }
 }

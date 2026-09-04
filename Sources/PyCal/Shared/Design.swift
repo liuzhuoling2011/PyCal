@@ -2,165 +2,166 @@ import AppKit
 import SwiftUI
 
 enum AppDesign {
-    static let cardRadius: CGFloat = 0
-    static let pageBackground = Color(nsColor: .windowBackgroundColor)
-    static let sidebarBackground = Color(nsColor: .controlBackgroundColor)
-    static let surface = Color(nsColor: .controlBackgroundColor)
-    static let inputBackground = Color(nsColor: .textBackgroundColor)
-    static let accent = Color(red: 0.03, green: 0.49, blue: 0.52)
-    static let muted = Color.primary.opacity(0.58)
-    static let hairline = Color.primary.opacity(0.10)
-}
+    static let canvas = Color(red: 246 / 255, green: 246 / 255, blue: 244 / 255)
+    static let rail = Color(red: 236 / 255, green: 236 / 255, blue: 232 / 255)
+    static let paper = Color.white
+    static let ink = Color(red: 29 / 255, green: 29 / 255, blue: 31 / 255)
+    static let secondary = Color(red: 58 / 255, green: 58 / 255, blue: 56 / 255)
+    static let muted = Color(red: 138 / 255, green: 138 / 255, blue: 134 / 255)
+    static let faint = Color(red: 180 / 255, green: 180 / 255, blue: 174 / 255)
+    static let preview = Color(red: 61 / 255, green: 107 / 255, blue: 102 / 255)
+    static let hairline = Color.black.opacity(0.07)
+    static let rowHover = Color.black.opacity(0.035)
+    static let iconSelected = Color.black.opacity(0.08)
+    static let composerBorder = Color.black.opacity(0.10)
 
-struct CardModifier: ViewModifier {
-    func body(content: Content) -> some View {
-        content
-            .background(
-                RoundedRectangle(cornerRadius: AppDesign.cardRadius, style: .continuous)
-                    .fill(AppDesign.surface)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: AppDesign.cardRadius, style: .continuous)
-                    .stroke(AppDesign.hairline, lineWidth: 1)
-            )
-    }
-}
-
-extension View {
-    func appCard() -> some View {
-        modifier(CardModifier())
-    }
-}
-
-struct AppBrandIcon: View {
-    var size: CGFloat = 34
-
-    var body: some View {
-        Group {
-            if let imageURL = Bundle.module.url(forResource: "PyCalIcon", withExtension: "png"),
-               let image = NSImage(contentsOf: imageURL) {
-                Image(nsImage: image)
-                    .resizable()
-                    .scaledToFit()
-            } else {
-                Image(systemName: "shippingbox.fill")
-                    .resizable()
-                    .scaledToFit()
-                    .padding(size * 0.2)
-                    .foregroundStyle(AppDesign.accent)
-            }
-        }
-        .frame(width: size, height: size)
-        .clipShape(RoundedRectangle(cornerRadius: size * 0.23, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: size * 0.23, style: .continuous)
-                .stroke(Color.primary.opacity(0.12), lineWidth: 0.6)
-        }
-    }
+    static let railWidth: CGFloat = 176
+    static let inspectorWidth: CGFloat = 232
+    static let iconSize: CGFloat = 30
+    static let iconRadius: CGFloat = 8
+    static let inspectorRadius: CGFloat = 12
+    static let composerRadius: CGFloat = 16
 }
 
 struct AppIconButton: View {
     let systemName: String
     let help: String
     let action: () -> Void
-    var tint: Color = .secondary
+    var tint: Color = AppDesign.muted
     var isProminent = false
+    var showsHoverCaption = false
+    @State private var isHovering = false
 
     init(
         systemName: String,
         help: String,
-        tint: Color = .secondary,
+        tint: Color = AppDesign.muted,
         isProminent: Bool = false,
+        showsHoverCaption: Bool = false,
         action: @escaping () -> Void
     ) {
         self.systemName = systemName
         self.help = help
         self.tint = tint
         self.isProminent = isProminent
+        self.showsHoverCaption = showsHoverCaption
         self.action = action
     }
 
     var body: some View {
         Button(action: action) {
             Image(systemName: systemName)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(tint)
-                .frame(width: 28, height: 28)
+                .font(.system(size: 13, weight: .regular))
+                .symbolRenderingMode(.monochrome)
+                .foregroundStyle(isProminent ? Color.white : tint)
+                .frame(width: 24, height: 24)
                 .background {
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(isProminent ? AppDesign.accent : Color.clear)
+                    if isProminent {
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(AppDesign.ink)
+                    }
                 }
         }
         .buttonStyle(.plain)
         .help(help)
+        .onHover { isHovering = $0 }
+        .overlay(alignment: .top) {
+            if showsHoverCaption, isHovering {
+                Text(help)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(AppDesign.ink)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .background(AppDesign.paper, in: Capsule())
+                    .overlay {
+                        Capsule().stroke(AppDesign.hairline, lineWidth: 1)
+                    }
+                    .shadow(color: Color.black.opacity(0.08), radius: 8, y: 2)
+                    .fixedSize()
+                    .offset(y: -22)
+                    .allowsHitTesting(false)
+            }
+        }
+        .zIndex(isHovering ? 20 : 0)
     }
 }
 
-struct SidebarItemButton: View {
-    let item: ToolboxItem
+struct RailItemButton: View {
+    let systemName: String
+    let title: String
     let isSelected: Bool
-    let showsSettings: Bool
-    let settingsAction: (() -> Void)?
     let action: () -> Void
-
-    init(
-        item: ToolboxItem,
-        isSelected: Bool,
-        showsSettings: Bool = false,
-        settingsAction: (() -> Void)? = nil,
-        action: @escaping () -> Void
-    ) {
-        self.item = item
-        self.isSelected = isSelected
-        self.showsSettings = showsSettings
-        self.settingsAction = settingsAction
-        self.action = action
-    }
+    @State private var isHovering = false
 
     var body: some View {
-        HStack(spacing: 4) {
-            Button(action: action) {
-                HStack(spacing: 11) {
-                    Image(systemName: item.symbol)
-                        .font(.system(size: 15, weight: .medium))
-                        .frame(width: 20)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(item.title)
-                            .font(.system(size: 13.5, weight: isSelected ? .semibold : .regular))
-                        Text(item.subtitle)
-                            .font(.system(size: 11))
-                            .foregroundStyle(isSelected ? Color.primary.opacity(0.62) : AppDesign.muted)
-                    }
-                    Spacer(minLength: 0)
-                }
-                .foregroundStyle(isSelected ? Color.primary : AppDesign.muted)
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: systemName)
+                    .font(.system(size: 14, weight: .regular))
+                    .symbolRenderingMode(.monochrome)
+                    .frame(width: 20, alignment: .center)
+                Text(title)
+                    .font(.system(size: 13, weight: isSelected ? .medium : .regular))
+                    .lineLimit(1)
+                Spacer(minLength: 0)
             }
-            .buttonStyle(.plain)
+            .foregroundStyle(isSelected || isHovering ? AppDesign.ink : AppDesign.muted)
+            .padding(.horizontal, 10)
+            .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
+            .contentShape(Rectangle())
+            .background {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(isSelected ? AppDesign.iconSelected : (isHovering ? AppDesign.rowHover : Color.clear))
+            }
+        }
+        .buttonStyle(.plain)
+        .frame(maxWidth: .infinity)
+        .help(title)
+        .onHover { isHovering = $0 }
+    }
+}
 
-            if showsSettings {
-                AppIconButton(systemName: "gearshape", help: "计算器设置") {
-                    if let settingsAction {
-                        settingsAction()
-                    } else {
-                        NotificationCenter.default.post(name: .showCalculatorSettings, object: nil)
-                    }
-                }
-            }
-        }
-        .padding(.horizontal, 11)
-        .padding(.vertical, 9)
-        .background {
-            RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .fill(isSelected ? AppDesign.accent.opacity(0.13) : Color.clear)
-        }
-        .overlay(alignment: .leading) {
-            if isSelected {
-                Capsule()
-                    .fill(AppDesign.accent)
-                    .frame(width: 3, height: 24)
-                    .offset(x: 1)
-            }
-        }
+final class NonMovingView: NSView {
+    override var mouseDownCanMoveWindow: Bool { false }
+}
+
+struct WindowDragBlocker: NSViewRepresentable {
+    func makeNSView(context: Context) -> NonMovingView {
+        NonMovingView()
+    }
+
+    func updateNSView(_ nsView: NonMovingView, context: Context) {}
+}
+
+final class NonMovingHostingView<Content: View>: NSHostingView<Content> {
+    override var mouseDownCanMoveWindow: Bool { false }
+}
+
+struct WindowDragDisabled<Content: View>: NSViewRepresentable {
+    var content: Content
+
+    init(@ViewBuilder content: () -> Content) {
+        self.content = content()
+    }
+
+    func makeNSView(context: Context) -> NonMovingHostingView<Content> {
+        NonMovingHostingView(rootView: content)
+    }
+
+    func updateNSView(_ nsView: NonMovingHostingView<Content>, context: Context) {
+        nsView.rootView = content
+    }
+}
+
+struct QuietTextButton: View {
+    let title: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(title, action: action)
+            .buttonStyle(.plain)
+            .font(.system(size: 12))
+            .foregroundStyle(AppDesign.muted)
     }
 }
 

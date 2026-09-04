@@ -23,6 +23,17 @@ final class ExpressionEvaluatorTests: XCTestCase {
         XCTAssertEqual(result.value, 143)
     }
 
+    @MainActor
+    func testPythonAssignmentCreatesVariable() {
+        let store = CalculatorStore(initialState: CalculatorState())
+        let line = store.evaluate("a = 3 * 6")
+        XCTAssertEqual(line?.result, 18)
+        XCTAssertEqual(line?.assignedVariable, "a")
+        XCTAssertEqual(store.variables.first(where: { $0.name == "a" })?.value, 18)
+        XCTAssertEqual(store.previewEvaluation("b = 2 + 2")?.assignment, "b")
+        XCTAssertEqual(store.previewEvaluation("b = 2 + 2")?.value, 4)
+    }
+
     func testUnknownVariableHasHelpfulError() {
         XCTAssertThrowsError(try ExpressionEvaluator().evaluate("subtotal + tax")) { error in
             XCTAssertEqual(error as? ExpressionError, .unknownVariable("subtotal"))
@@ -95,5 +106,31 @@ final class ExpressionEvaluatorTests: XCTestCase {
         XCTAssertEqual(store.lines.first?.result, 3)
         XCTAssertTrue(store.updateExpression("a = 1 + 22", for: row))
         XCTAssertEqual(store.variables.first(where: { $0.name == "a" })?.value, 23)
+    }
+
+    @MainActor
+    func testNewCalculationIsInsertedAtTop() {
+        let older = CalculatorLine(expression: "1 + 1", result: 2, createdAt: Date(timeIntervalSince1970: 1_700_000_000))
+        let store = CalculatorStore(initialState: CalculatorState(lines: [older]))
+        let newer = store.evaluate("2 + 2")
+        XCTAssertEqual(store.lines.first?.id, newer?.id)
+        XCTAssertEqual(store.lines.last?.id, older.id)
+    }
+
+    @MainActor
+    func testHistoryCanBeReorderedByDragging() {
+        let first = CalculatorLine(expression: "1", result: 1, createdAt: Date(timeIntervalSince1970: 1))
+        let second = CalculatorLine(expression: "2", result: 2, createdAt: Date(timeIntervalSince1970: 2))
+        let third = CalculatorLine(expression: "3", result: 3, createdAt: Date(timeIntervalSince1970: 3))
+        let store = CalculatorStore(initialState: CalculatorState(lines: [first, second, third]))
+
+        store.moveLine(id: third.id, before: first.id)
+        XCTAssertEqual(store.lines.map(\.expression), ["3", "1", "2"])
+
+        store.moveLine(id: first.id, before: nil)
+        XCTAssertEqual(store.lines.map(\.expression), ["3", "2", "1"])
+
+        store.moveLine(id: third.id, toIndex: 1)
+        XCTAssertEqual(store.lines.map(\.expression), ["2", "3", "1"])
     }
 }

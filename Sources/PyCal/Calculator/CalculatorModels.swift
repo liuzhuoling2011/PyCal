@@ -46,4 +46,34 @@ struct CalculatorState: Codable {
     var lines: [CalculatorLine] = []
     var variables: [CalculatorVariable] = []
     var historyLimit: Int = 100
+    var schemaVersion: Int = 1
+
+    enum CodingKeys: String, CodingKey {
+        case lines, variables, historyLimit, schemaVersion
+    }
+
+    init(
+        lines: [CalculatorLine] = [],
+        variables: [CalculatorVariable] = [],
+        historyLimit: Int = 100,
+        schemaVersion: Int = 1
+    ) {
+        self.lines = lines
+        self.variables = variables
+        self.historyLimit = historyLimit
+        self.schemaVersion = schemaVersion
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        lines = try container.decodeIfPresent([CalculatorLine].self, forKey: .lines) ?? []
+        variables = try container.decodeIfPresent([CalculatorVariable].self, forKey: .variables) ?? []
+        historyLimit = try container.decodeIfPresent(Int.self, forKey: .historyLimit) ?? 100
+        schemaVersion = try container.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 0
+    }
+}
+
+struct CalculatorPreview: Equatable {
+    let value: Double
+    let assignment: String?
 }

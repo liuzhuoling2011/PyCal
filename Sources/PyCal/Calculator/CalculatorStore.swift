@@ -15,10 +15,13 @@ final class CalculatorStore: ObservableObject {
         let persistence = CalculatorPersistence()
         self.persistence = persistence
         let state = persistence.load()
-        lines = state.lines
+        lines = Self.migratedDisplayOrder(state.lines, schemaVersion: state.schemaVersion)
         variables = state.variables
         historyLimit = min(max(state.historyLimit, 10), 500)
         trimHistory()
+        if state.schemaVersion < 1 {
+            save()
+        }
     }
 
     /// Creates an in-memory store. This is useful for previews and tests, and
@@ -65,7 +68,7 @@ final class CalculatorStore: ObservableObject {
                 result: evaluated.value,
                 assignedVariable: evaluated.assignment
             )
-            lines.append(line)
+            lines.insert(line, at: 0)
             if let assignment = evaluated.assignment {
                 upsertVariable(name: assignment, value: evaluated.value, shouldSave: false)
             }
@@ -84,11 +87,18 @@ final class CalculatorStore: ObservableObject {
     /// It never writes history or surfaces an error, so incomplete formulas
     /// such as `12 * (` are safe to type naturally.
     func preview(_ expression: String) -> Double? {
+        previewEvaluation(expression)?.value
+    }
+
+    func previewEvaluation(_ expression: String) -> CalculatorPreview? {
         let trimmed = expression.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
         var context = variableMap
         if let previousResult { context["ans"] = previousResult }
-        return try? ExpressionEvaluator(variables: context).evaluate(trimmed).value
+        guard let evaluated = try? ExpressionEvaluator(variables: context).evaluate(trimmed) else {
+            return nil
+        }
+        return CalculatorPreview(value: evaluated.value, assignment: evaluated.assignment)
     }
 
     func togglePin(_ line: CalculatorLine) {
@@ -105,6 +115,32 @@ final class CalculatorStore: ObservableObject {
 
     func remove(_ line: CalculatorLine) {
         lines.removeAll { $0.id == line.id }
+        save()
+    }
+
+    func moveLine(id: UUID, before targetID: UUID?) {
+        guard let from = lines.firstIndex(where: { $0.id == id }) else { return }
+        var updated = lines
+        let item = updated.remove(at: from)
+        if let targetID, let destination = updated.firstIndex(where: { $0.id == targetID }) {
+            updated.insert(item, at: destination)
+        } else {
+            updated.append(item)
+        }
+        applyReorderedLines(updated)
+    }
+
+    func moveLine(id: UUID, toIndex: Int) {
+        guard let from = lines.firstIndex(where: { $0.id == id }) else { return }
+        var updated = lines
+        let item = updated.remove(at: from)
+        updated.insert(item, at: min(max(toIndex, 0), updated.count))
+        applyReorderedLines(updated)
+    }
+
+    private func applyReorderedLines(_ updated: [CalculatorLine]) {
+        guard updated.map(\.id) != lines.map(\.id) else { return }
+        lines = updated
         save()
     }
 
@@ -259,8 +295,16 @@ final class CalculatorStore: ObservableObject {
         return name.allSatisfy { $0.isLetter || $0.isNumber || $0 == "_" }
     }
 
+    private static func migratedDisplayOrder(_ lines: [CalculatorLine], schemaVersion: Int) -> [CalculatorLine] {
+        guard schemaVersion < 1 else { return lines }
+        return lines.sorted {
+            if $0.isPinned != $1.isPinned { return $0.isPinned }
+            return $0.createdAt > $1.createdAt
+        }
+    }
+
     private func save() {
-        persistence?.save(CalculatorState(lines: lines, variables: variables, historyLimit: historyLimit))
+        persistence?.save(CalculatorState(lines: lines, variables: variables, historyLimit: historyLimit, schemaVersion: 1))
     }
 }
 

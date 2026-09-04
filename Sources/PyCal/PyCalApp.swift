@@ -3,13 +3,11 @@ import SwiftUI
 
 final class PyCalAppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // `swift run` starts the executable from a terminal. Explicitly make
-        // the SwiftUI window the active key window so keyboard input goes to
-        // its TextField instead of remaining with Terminal.
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         DispatchQueue.main.async {
             NSApp.windows.first?.makeKeyAndOrderFront(nil)
+            NSApp.windows.first?.isMovableByWindowBackground = true
         }
     }
 }
@@ -23,9 +21,9 @@ struct PyCalApp: App {
         WindowGroup {
             AppShellView()
                 .environmentObject(calculatorStore)
-                .frame(minWidth: 960, minHeight: 640)
+                .frame(minWidth: 900, minHeight: 600)
         }
-        .defaultSize(width: 1160, height: 760)
+        .defaultSize(width: 1080, height: 720)
         .windowStyle(.hiddenTitleBar)
         .commands {
             CommandGroup(replacing: .newItem) {
@@ -46,15 +44,8 @@ enum ToolboxItem: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .calculator: "稿纸计算器"
-        case .timeConverter: "时间转换"
-        }
-    }
-
-    var subtitle: String {
-        switch self {
-        case .calculator: "Python 风格表达式"
-        case .timeConverter: "时间戳与日期"
+        case .calculator: "稿纸计算"
+        case .timeConverter: "时间换算"
         }
     }
 
@@ -67,94 +58,78 @@ enum ToolboxItem: String, CaseIterable, Identifiable {
 }
 
 struct AppShellView: View {
-    @State private var selection: ToolboxItem? = .calculator
+    @EnvironmentObject private var calculatorStore: CalculatorStore
+    @State private var selection: ToolboxItem = .calculator
+    @State private var showingSettings = false
 
     var body: some View {
-        NavigationSplitView {
-            AppSidebar(selection: $selection)
-                .navigationSplitViewColumnWidth(min: 220, ideal: 248, max: 280)
-        } detail: {
+        HStack(spacing: 0) {
+            AppIconRail(selection: $selection, showingSettings: $showingSettings)
             Group {
-                switch selection ?? .calculator {
+                switch selection {
                 case .calculator:
                     CalculatorView()
                 case .timeConverter:
                     TimeConverterView()
                 }
             }
-            .background(Color(nsColor: .windowBackgroundColor))
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(AppDesign.canvas)
         }
-        .navigationSplitViewStyle(.balanced)
+        .background(AppDesign.canvas)
+        .overlay {
+            if showingSettings {
+                SettingsModal {
+                    showingSettings = false
+                }
+                .environmentObject(calculatorStore)
+            }
+        }
+        .animation(.easeOut(duration: 0.16), value: showingSettings)
+        .onExitCommand {
+            if showingSettings { showingSettings = false }
+        }
     }
 }
 
-private struct AppSidebar: View {
-    @Binding var selection: ToolboxItem?
+private struct AppIconRail: View {
+    @Binding var selection: ToolboxItem
+    @Binding var showingSettings: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 10) {
-                AppBrandIcon(size: 42)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("PyCal")
-                        .font(.system(size: 16, weight: .semibold))
-                    Text("原生小工具箱")
-                        .font(.system(size: 11))
-                        .foregroundStyle(AppDesign.muted)
-                }
-                Spacer()
-                Image(systemName: "sidebar.left")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(.tertiary)
-            }
-            .padding(.horizontal, 14)
-            .padding(.top, 18)
-            .padding(.bottom, 19)
-
-            Text("工具")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.tertiary)
-                .textCase(.uppercase)
-                .padding(.horizontal, 23)
-                .padding(.bottom, 8)
-
-            VStack(spacing: 3) {
-                ForEach(ToolboxItem.allCases) { item in
-                    SidebarItemButton(
-                        item: item,
-                        isSelected: selection == item,
-                        showsSettings: item == .calculator,
-                        settingsAction: item == .calculator ? {
-                            selection = .calculator
-                            DispatchQueue.main.async {
-                                NotificationCenter.default.post(name: .showCalculatorSettings, object: nil)
-                            }
-                        } : nil
-                    ) {
-                        selection = item
-                    }
+        VStack(alignment: .leading, spacing: 2) {
+            ForEach(ToolboxItem.allCases) { item in
+                RailItemButton(
+                    systemName: item.symbol,
+                    title: item.title,
+                    isSelected: selection == item
+                ) {
+                    selection = item
                 }
             }
-            .padding(.horizontal, 10)
-
-            Spacer(minLength: 20)
-
-            HStack(spacing: 8) {
-                Image(systemName: "lock.shield")
-                    .font(.system(size: 12))
-                Text("数据仅保存在本机")
-                    .font(.system(size: 11))
-                Spacer(minLength: 0)
+            Spacer(minLength: 12)
+            RailItemButton(
+                systemName: "gearshape",
+                title: "设置",
+                isSelected: showingSettings
+            ) {
+                showingSettings.toggle()
             }
-            .foregroundStyle(.tertiary)
-            .padding(.horizontal, 15)
-            .padding(.bottom, 16)
         }
-        .background(AppDesign.sidebarBackground)
+        .padding(.top, 42)
+        .padding(.horizontal, 10)
+        .padding(.bottom, 12)
+        .frame(width: AppDesign.railWidth)
+        .frame(maxHeight: .infinity, alignment: .top)
+        .background(AppDesign.rail)
+        .overlay(alignment: .trailing) {
+            Rectangle()
+                .fill(AppDesign.hairline)
+                .frame(width: 1)
+        }
     }
 }
 
 extension Notification.Name {
     static let focusCalculatorInput = Notification.Name("focusCalculatorInput")
-    static let showCalculatorSettings = Notification.Name("showCalculatorSettings")
 }
