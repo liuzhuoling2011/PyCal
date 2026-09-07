@@ -16,7 +16,8 @@ let package = Package(
             name: "PyCal",
             path: "Sources/PyCal",
             resources: [
-                .process("Resources")
+                .process("Resources"),
+                .copy("PrivacyInfo.xcprivacy")
             ]
         ),
         .testTarget(

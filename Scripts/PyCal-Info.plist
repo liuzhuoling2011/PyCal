@@ -9,7 +9,7 @@
     <key>CFBundleIconFile</key>
     <string>PyCalIcon.icns</string>
     <key>CFBundleIdentifier</key>
-    <string>dev.pycal.app</string>
+    <string>com.liuzhuoling.pycal</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
@@ -19,11 +19,17 @@
     <key>CFBundleShortVersionString</key>
     <string>0.1.0</string>
     <key>CFBundleVersion</key>
-    <string>1</string>
+    <string>2</string>
+    <key>ITSAppUsesNonExemptEncryption</key>
+    <false/>
+    <key>LSApplicationCategoryType</key>
+    <string>public.app-category.utilities</string>
     <key>LSMinimumSystemVersion</key>
     <string>14.0</string>
     <key>NSHighResolutionCapable</key>
     <true/>
+    <key>NSHumanReadableCopyright</key>
+    <string>Copyright © 2026 PyCal</string>
     <key>NSPrincipalClass</key>
     <string>NSApplication</string>
 </dict>

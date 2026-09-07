@@ -30,6 +30,10 @@ apply_versions() {
 build_with_xcodebuild() {
     local product
     echo "Using xcodebuild (universal macOS Release)…"
+    # Signing is deferred so the Developer ID step below can stamp Hardened
+    # Runtime without PyCal.entitlements. That keeps GitHub DMG builds
+    # unsandboxed (existing ~/Library/Application Support/PyCal). Mac App
+    # Store archives use Scripts/archive-mac-app-store.sh instead.
     xcodebuild \
         -project "$root_dir/PyCal.xcodeproj" \
         -scheme PyCal \

@@ -313,6 +313,9 @@ private struct CalculatorPersistence {
 
     init() {
         let fileManager = FileManager.default
+        // App Sandbox (Mac App Store) remaps this into the app container.
+        // Developer ID DMG builds stay unsandboxed and keep the normal
+        // ~/Library/Application Support/PyCal path. No extra entitlements.
         let base = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? fileManager.urls(for: .documentDirectory, in: .userDomainMask).first!
         let directory = base.appendingPathComponent("PyCal", isDirectory: true)
