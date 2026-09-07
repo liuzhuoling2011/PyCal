@@ -52,7 +52,11 @@ version="$(pycal_resolve_version "$root_dir")"
 if /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app_path/Contents/Info.plist" >/dev/null 2>&1; then
     version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app_path/Contents/Info.plist")"
 fi
-dmg_path="$output_dir/PyCal-$version.dmg"
+if [[ -z "${version}" ]]; then
+    echo "internal error: marketing version is empty" >&2
+    exit 1
+fi
+dmg_path="$output_dir/PyCal-${version}.dmg"
 
 if identity="$(pycal_find_developer_id_identity)"; then
     echo "Signing with $identity"
@@ -113,38 +117,9 @@ if [[ "$signed" -eq 1 ]]; then
     codesign --force --options runtime --timestamp --sign "$identity" "$payload/安装到个人目录.app"
 fi
 
-if [[ "$notarized" -eq 1 ]]; then
-    cat > "$payload/使用说明.txt" <<NOTE
-PyCal $version（已 Developer ID 签名并公证）
-
-把 PyCal.app 拖到旁边的 Applications，再从「应用程序」双击打开即可。
-这张磁盘映像已公证并 staple，从浏览器下载后一般不必再清隔离属性。
-
-不要关闭系统完整性保护，也不要关闭 Gatekeeper。
-
-如果公司 MDM 仍拦截（少见），用旁边的「首次打开.command」装到
-~/Applications。那只会去掉这一份 App 的下载隔离标记，不是关闭系统安全。
-NOTE
-else
-    cat > "$payload/使用说明.txt" <<NOTE
-PyCal $version（未公证，双击通常会被拦截）
-
-这张磁盘映像没有 Apple 公证。Safari / Chrome / 部分聊天软件下载后会带上
-com.apple.quarantine，Gatekeeper 会阻止直接双击。
-
-请不要关闭 Gatekeeper。用下面任一方式打开这一份 App：
-
-1. 双击「首次打开.command」（若提示来自互联网，选打开）。
-2. 选中 PyCal.app，按住 Control 点按 → 打开。
-3. 终端（先把 App 放到 ~/Applications）：
-
-   xattr -d com.apple.quarantine ~/Applications/PyCal.app
-   open ~/Applications/PyCal.app
-
-需要「下载后直接双击」时，维护者要在 GitHub Actions 配好 Developer ID
-与 App Store Connect API 密钥后再打 tag 发布。说明见 docs/release.md。
-NOTE
-fi
+# Quote every heredoc; never interpolate $version next to UTF-8 (bash 3.2 + set -u).
+usage_note="$payload/使用说明.txt"
+pycal_write_dmg_usage_note "$usage_note" "${version}" "$notarized"
 
 layout_dmg() {
     mount_dir="$(hdiutil attach -readwrite -noverify -noautoopen "$rw_dmg" | awk '/\/Volumes\//{print $NF; exit}')"
@@ -156,6 +131,7 @@ layout_dmg() {
     ditto --noqtn "$payload/." "$mount_dir/"
     sync
 
+    # Quoted so AppleScript text (including Chinese item names) is not expanded.
     osascript <<'EOF' || echo "跳过窗口排版（不影响安装）"
 tell application "Finder"
     tell disk "PyCal"
