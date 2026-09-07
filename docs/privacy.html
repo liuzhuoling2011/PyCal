@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="zh-Hans">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PyCal 隐私政策 / Privacy Policy</title>
+  <meta name="description" content="PyCal 不收集、不上传用户数据。计算器历史与变量仅保存在本机。">
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f6f4;
+      --card: #ffffff;
+      --ink: #1d1d1f;
+      --muted: #6e6e73;
+      --line: rgba(0, 0, 0, 0.08);
+      --accent: #1d4ed8;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+      line-height: 1.7;
+    }
+    main {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 48px 24px 72px;
+    }
+    header {
+      margin-bottom: 32px;
+    }
+    .app {
+      font-size: 13px;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin: 0 0 8px;
+    }
+    h1 {
+      font-size: 32px;
+      font-weight: 650;
+      letter-spacing: -0.03em;
+      margin: 0 0 12px;
+    }
+    .meta {
+      color: var(--muted);
+      font-size: 14px;
+      margin: 0;
+    }
+    nav {
+      display: flex;
+      gap: 16px;
+      margin: 20px 0 0;
+      font-size: 14px;
+    }
+    a { color: var(--accent); }
+    section {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 24px 28px;
+      margin: 0 0 16px;
+    }
+    h2 {
+      font-size: 18px;
+      margin: 0 0 12px;
+    }
+    p, li { font-size: 16px; }
+    p { margin: 0 0 12px; }
+    p:last-child, ul:last-child { margin-bottom: 0; }
+    ul { margin: 0; padding-left: 1.2em; }
+    li { margin: 0 0 8px; }
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.92em;
+      background: #f2f2ef;
+      padding: 0.1em 0.35em;
+      border-radius: 6px;
+    }
+    .en h2 { font-size: 16px; }
+    .en p, .en li { font-size: 15px; color: #3a3a3c; }
+    footer {
+      margin-top: 28px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <p class="app">PyCal · com.liuzhuoling.pycal</p>
+      <h1>隐私政策</h1>
+      <p class="meta">最后更新：2026-09-07 · macOS</p>
+      <nav>
+        <a href="support.html">支持</a>
+        <a href="https://github.com/liuzhuoling2011/PyCal">GitHub</a>
+      </nav>
+    </header>
+
+    <section>
+      <h2>概述</h2>
+      <p>PyCal 是一款在本机运行的计算器与时间换算工具。应用<strong>不会收集、上传或与第三方共享</strong>你的个人信息或使用数据。</p>
+      <p>App Store Connect 营养标签对应选项为：<strong>不收集数据</strong>。</p>
+    </section>
+
+    <section>
+      <h2>本机存储</h2>
+      <p>稿纸计算器的历史记录与变量只写在你这台 Mac 上，文件位于 Application Support 下的 <code>PyCal/calculator.json</code>：</p>
+      <ul>
+        <li>直接分发（非沙盒）版本：<code>~/Library/Application Support/PyCal/</code></li>
+        <li>Mac App Store（沙盒）版本：应用容器内对应的 Application Support 目录</li>
+      </ul>
+      <p>这些文件不会离开设备。卸载应用或手动删除该目录即可清除。时间换算的输入仅用于当前会话，不会单独上传。</p>
+    </section>
+
+    <section>
+      <h2>我们不会做的事</h2>
+      <ul>
+        <li>不建立账号，也不要求登录</li>
+        <li>不进行网络上传或远程同步</li>
+        <li>不使用分析、崩溃统计或广告标识符</li>
+        <li>不追踪跨 App / 跨网站行为</li>
+        <li>不展示第三方广告，也不嵌入广告 SDK</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>联系我们</h2>
+      <p>对隐私政策有疑问，请通过 GitHub Issues 联系：</p>
+      <p><a href="https://github.com/liuzhuoling2011/PyCal/issues">https://github.com/liuzhuoling2011/PyCal/issues</a></p>
+    </section>
+
+    <section class="en" lang="en">
+      <h2>English summary</h2>
+      <p>PyCal (macOS, bundle ID <code>com.liuzhuoling.pycal</code>) does not collect, upload, or share personal data. Calculator history and variables stay on-device in Application Support. There is no account, no analytics, no tracking, and no third-party ads. Questions: <a href="https://github.com/liuzhuoling2011/PyCal/issues">GitHub Issues</a>. Last updated 2026-09-07.</p>
+    </section>
+
+    <footer>
+      Copyright © 2026 PyCal
+    </footer>
+  </main>
+</body>
+</html>

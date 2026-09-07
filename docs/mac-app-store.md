@@ -126,10 +126,10 @@ xcrun altool --upload-app …   # 已弃用
 
 - **类别**：工具（Utilities），与 `LSApplicationCategoryType` 一致
 - **年龄分级**：问卷。本 App 无用户生成社交、无位置、无购买也可先按「无受限内容」填
-- **隐私**：计算历史只在本机；不追踪。营养标签选「不收集数据」。若 ASC 仍要隐私政策 URL，需要你自己托管一页（仓库不提供）
+- **隐私**：计算历史只在本机；不追踪。营养标签选「不收集数据」。隐私政策页：仓库 `docs/privacy.html`。GitHub **Settings → Pages → Deploy from branch** 选 `main` / `docs` 后，ASC 可用 https://liuzhuoling2011.github.io/PyCal/privacy.html 与支持页 https://liuzhuoling2011.github.io/PyCal/support.html
 - **截图**：Mac 至少一套（常见 1280×800 或 2560×1600 等，以 ASC 当前尺寸表为准）。本仓库不代做
 - **审核备注**：可写「本地计算器 + 时间戳换算，无账号、无网络」
-- **版权 / 联系人**：Info.plist 已有 `NSHumanReadableCopyright`；ASC 还要自己的版权年和支持网址
+- **版权 / 联系人**：Info.plist 已有 `NSHumanReadableCopyright`；ASC 还要自己的版权年和支持网址（支持页同上，开启 Pages 后为 https://liuzhuoling2011.github.io/PyCal/support.html）
 - **价格**：免费或付费；付费要先完成合同
 - **出口合规**：工程已设 `ITSAppUsesNonExemptEncryption = NO`，一般可跳过年度加密问卷
 
