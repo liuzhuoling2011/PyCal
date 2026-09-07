@@ -123,9 +123,8 @@ jobs:
               echo
               echo "Do **not** turn off Gatekeeper. Use one of these instead:"
               echo
-              echo "1. Open the DMG and run **首次打开.command** (if macOS says it came from the internet, choose Open)."
-              echo "2. Select \`PyCal.app\`, Control-click → **Open**."
-              echo "3. \`xattr -d com.apple.quarantine ~/Applications/PyCal.app\` then \`open ~/Applications/PyCal.app\`."
+              echo "1. Select \`PyCal.app\`, Control-click → **Open**."
+              echo "2. \`xattr -d com.apple.quarantine ~/Applications/PyCal.app\` then \`open ~/Applications/PyCal.app\`."
               echo
               echo "For a colleague-safe double-click build, add the Developer ID and App Store Connect secrets documented in \`docs/release.md\` and push the tag again."
             fi

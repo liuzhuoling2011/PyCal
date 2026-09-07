@@ -1,6 +1,7 @@
 #!/bin/bash
-# Regression check for the bash 3.2 `$version（` / set -u crash that aborted
-# Package DMG after notarization (tag v0.1.0, run 34127587132).
+# Packaging-script sanity check: bash 3.2 `$version` + UTF-8 heredoc guard,
+# plus a source-level check that Gatekeeper fallback helpers are not staged
+# into the release DMG.
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "$0")" && pwd)"
@@ -49,33 +50,13 @@ bash -n "$script_dir/make-macos-dmg.sh"
 bash -n "$script_dir/lib-macos-release.sh"
 echo "bash -n: ok"
 
-stage="$(mktemp -d /tmp/pycal-usage-note.XXXXXX)"
-trap 'rm -rf "$stage"' EXIT
-
-notarized_note="$stage/使用说明-notarized.txt"
-unsigned_note="$stage/使用说明-unsigned.txt"
-
-# Chinese destination path + set -u, same as CI after stapling the helper app.
-set -u
-pycal_write_dmg_usage_note "$notarized_note" "0.1.0" 1
-pycal_write_dmg_usage_note "$unsigned_note" "0.1.0" 0
-
-grep -Fqx "PyCal 0.1.0（已 Developer ID 签名并公证）" "$notarized_note" \
-    || fail "notarized header missing version"
-grep -Fqx "PyCal 0.1.0（未公证，双击通常会被拦截）" "$unsigned_note" \
-    || fail "unsigned header missing version"
-grep -F "不要关闭系统完整性保护" "$notarized_note" >/dev/null \
-    || fail "notarized body truncated"
-grep -F "docs/release.md" "$unsigned_note" >/dev/null \
-    || fail "unsigned body truncated"
-
-if pycal_write_dmg_usage_note "$stage/empty.txt" "" 1 2>/dev/null; then
-    fail "empty version should be rejected under set -u"
+if grep -nE 'pycal_write_dmg_usage_note|安装到个人目录|首次打开\.command|使用说明\.txt' \
+    "$script_dir/make-macos-dmg.sh" "$script_dir/lib-macos-release.sh"; then
+    fail "packaging scripts still stage Gatekeeper fallback helpers into the DMG"
 fi
 
-echo "usage notes:"
-echo "---- notarized ----"
-cat "$notarized_note"
-echo "---- unsigned ----"
-cat "$unsigned_note"
-echo "OK"
+if type pycal_write_dmg_usage_note >/dev/null 2>&1; then
+    fail "pycal_write_dmg_usage_note should be removed (usage note is no longer in the DMG)"
+fi
+
+echo "OK: DMG packaging no longer stages usage note or Gatekeeper helpers"
