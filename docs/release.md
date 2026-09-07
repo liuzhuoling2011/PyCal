@@ -123,7 +123,7 @@ NOTARY_PROFILE=pycal-notary ./Scripts/make-macos-dmg.sh Build/PyCal.app Build
 - **没 staple**：公证过了但没钉票，离线或刚下载时仍可能失败。workflow 在 App 和 DMG 上都会 `stapler staple`。
 - **公司 MDM / 限制模式**：个别机器即使用户打开公证过的 App 也会被策略拦截。这不是再清一遍 xattr 能解决的，需要 IT。
 - **把 `.app` 从「隔离的」未公证 DMG 里拖出来**：quarantine 会跟着走。要么发公证版，要么对本份 App 右键打开或 `xattr`。
-- **iOS / App Store**：本流程只做 macOS 直接分发。不上传 App Store Connect，也不打 iOS ipa。
+- **iOS / Mac App Store**：本流程只做 macOS 直接分发（Developer ID + 公证）。商店上架是另一条线（App Sandbox + Apple Distribution + Transporter），见 [mac-app-store.md](mac-app-store.md)。不要用 `notarytool` 交商店包，也不要把 Apple Distribution 证书接到本 DMG workflow。
 
 ## DMG 里有什么
 
@@ -136,3 +136,4 @@ NOTARY_PROFILE=pycal-notary ./Scripts/make-macos-dmg.sh Build/PyCal.app Build
 - `Scripts/make-macos-dmg.sh` — 打 `PyCal-$version.dmg`（`hdiutil create` / `convert` 到 UDZO）。有身份就签；有公证凭证就提交并 staple。
 - `Scripts/ci-import-signing.sh` — CI 把 `.p12` 推进临时钥匙串。
 - `Scripts/run-macos.sh` — 本地编、安装、打开。
+- Mac App Store 归档 / 导出（不动本 DMG 路径）：`Scripts/archive-mac-app-store.sh`，说明见 [mac-app-store.md](mac-app-store.md)。
