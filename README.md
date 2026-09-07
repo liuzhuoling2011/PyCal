@@ -42,7 +42,7 @@ Secrets、为什么有的机器能开有的不能、以及公证失败时查什�
 
 ### 上架 Mac App Store
 
-和上面的 Developer ID / 公证 **不是同一条线**：商店包必须开 App Sandbox，用 Apple Distribution 签名，用 Organizer / Transporter / `xcodebuild -exportArchive` 上传，**不要**对商店包跑 `notarytool`。步骤、证书和阻塞项见 [docs/mac-app-store.md](docs/mac-app-store.md)。本机归档：
+和上面的 Developer ID / 公证 **不是同一条线**：商店包必须开 App Sandbox，用 Apple Distribution 签名，用 Organizer / Transporter / `xcodebuild -exportArchive` 上传，**不要**对商店包跑 `notarytool`。两条线共用 Bundle ID **`com.liuzhuoling.pycal`**（与 App Store Connect 里已建的 Mac App 一致）。步骤、证书和阻塞项见 [docs/mac-app-store.md](docs/mac-app-store.md)。本机归档：
 
 ```sh
 ./Scripts/archive-mac-app-store.sh

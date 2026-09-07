@@ -9,7 +9,7 @@
     <key>CFBundleIconFile</key>
     <string>PyCalIcon.icns</string>
     <key>CFBundleIdentifier</key>
-    <string>dev.pycal.app</string>
+    <string>com.liuzhuoling.pycal</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>

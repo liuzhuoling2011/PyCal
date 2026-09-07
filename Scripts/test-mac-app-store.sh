@@ -80,8 +80,11 @@ if not file_ts or "C617.1" not in file_ts.get("NSPrivacyAccessedAPITypeReasons",
     sys.exit(1)
 
 info = load_plist(root / "Scripts/PyCal-Info.plist")
-if info.get("CFBundleIdentifier") != "dev.pycal.app":
+if info.get("CFBundleIdentifier") != "com.liuzhuoling.pycal":
     print("FAIL: Scripts/PyCal-Info.plist bundle id", file=sys.stderr)
+    sys.exit(1)
+if "dev.pycal.app" in (root / "PyCal.xcodeproj/project.pbxproj").read_text(encoding="utf-8"):
+    print("FAIL: project.pbxproj still references abandoned bundle id dev.pycal.app", file=sys.stderr)
     sys.exit(1)
 if info.get("ITSAppUsesNonExemptEncryption") is not False:
     print("FAIL: Scripts/PyCal-Info.plist must set ITSAppUsesNonExemptEncryption=false", file=sys.stderr)
@@ -92,7 +95,7 @@ for needle in (
     "CODE_SIGN_ENTITLEMENTS = PyCal.entitlements;",
     "ENABLE_APP_SANDBOX = YES;",
     "ENABLE_HARDENED_RUNTIME = YES;",
-    "PRODUCT_BUNDLE_IDENTIFIER = dev.pycal.app;",
+    "PRODUCT_BUNDLE_IDENTIFIER = com.liuzhuoling.pycal;",
     "INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;",
     'INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";',
 ):
@@ -135,7 +138,7 @@ if "PrivacyInfo.xcprivacy" not in pkg:
 print("entitlements: sandbox-only")
 print("export options: app-store-connect / automatic / export")
 print("privacy manifest: no tracking, FileTimestamp C617.1")
-print("xcodeproj: sandbox + hardened runtime + bundle id")
+print("xcodeproj: sandbox + hardened runtime + com.liuzhuoling.pycal")
 print("DMG path: still unsigned-then-Developer-ID, no entitlements")
 print("OK")
 PY

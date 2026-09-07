@@ -159,6 +159,6 @@ if [[ -n "${pkg:-}" ]]; then
 fi
 echo "CFBundleShortVersionString=$version CFBundleVersion=$build_number"
 echo
-echo "Next: create/select the App Store Connect Mac record for dev.pycal.app,"
+echo "Next: select the App Store Connect Mac record for com.liuzhuoling.pycal,"
 echo "then submit the build for review. See docs/mac-app-store.md."
 echo "Do not notarize this pkg with notarytool."
