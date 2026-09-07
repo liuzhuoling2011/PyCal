@@ -145,15 +145,10 @@ if [[ -z "${pkg:-}" && "$upload" -eq 0 ]]; then
     exit 1
 fi
 
-if [[ "$upload" -eq 1 && -n "${pkg:-}" && ${#auth_args[@]} -eq 0 ]]; then
-    echo "xcodebuild destination=upload completed (Xcode account)."
-elif [[ "$upload" -eq 1 && -n "${pkg:-}" && -n "${api_key_file:-}" ]]; then
-    echo "If export did not upload, sending $pkg with iTMSTransporter…"
-    xcrun iTMSTransporter -m upload \
-        -assetFile "$pkg" \
-        -apiKey "$APP_STORE_CONNECT_KEY_ID" \
-        -apiIssuer "$APP_STORE_CONNECT_ISSUER_ID" \
-        -apiKeyPath "$api_key_file"
+if [[ "$upload" -eq 1 ]]; then
+    echo "xcodebuild destination=upload finished. Confirm the build in App Store Connect → Activity."
+    echo "If you exported a .pkg earlier, upload it with Transporter.app or:"
+    echo "  xcrun iTMSTransporter -m upload -assetFile <PyCal.pkg> -apiKey <KEY_ID> -apiIssuer <ISSUER>"
 fi
 
 echo
