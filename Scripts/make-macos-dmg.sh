@@ -100,26 +100,14 @@ mkdir -p "$payload"
 
 echo "Staging DMG contents…"
 # Keep code-signing xattrs and the notarization ticket; only suppress quarantine.
+# Payload is only PyCal.app + Applications (standard drag-to-install). Gatekeeper
+# fallback helpers stay in Scripts/ for local debug and are not staged.
 ditto --noqtn "$app_path" "$payload/PyCal.app"
 ln -s /Applications "$payload/Applications"
 pycal_clear_quarantine "$payload/PyCal.app"
 if [[ "$signed" -eq 1 ]]; then
     codesign --verify --strict --verbose=2 "$payload/PyCal.app"
 fi
-
-osacompile -o "$payload/安装到个人目录.app" "$root_dir/Scripts/InstallToUserApplications.applescript"
-cp "$root_dir/Scripts/首次打开.command" "$payload/首次打开.command"
-chmod +x "$payload/首次打开.command"
-pycal_clear_quarantine "$payload/安装到个人目录.app"
-pycal_clear_quarantine "$payload/首次打开.command"
-
-if [[ "$signed" -eq 1 ]]; then
-    codesign --force --options runtime --timestamp --sign "$identity" "$payload/安装到个人目录.app"
-fi
-
-# Quote every heredoc; never interpolate $version next to UTF-8 (bash 3.2 + set -u).
-usage_note="$payload/使用说明.txt"
-pycal_write_dmg_usage_note "$usage_note" "${version}" "$notarized"
 
 layout_dmg() {
     mount_dir="$(hdiutil attach -readwrite -noverify -noautoopen "$rw_dmg" | awk '/\/Volumes\//{print $NF; exit}')"
@@ -131,7 +119,7 @@ layout_dmg() {
     ditto --noqtn "$payload/." "$mount_dir/"
     sync
 
-    # Quoted so AppleScript text (including Chinese item names) is not expanded.
+    # Quoted so AppleScript text is not expanded.
     osascript <<'EOF' || echo "跳过窗口排版（不影响安装）"
 tell application "Finder"
     tell disk "PyCal"
@@ -139,15 +127,12 @@ tell application "Finder"
         set current view of container window to icon view
         set toolbar visible of container window to false
         set statusbar visible of container window to false
-        set the bounds of container window to {160, 140, 860, 520}
+        set the bounds of container window to {160, 140, 700, 480}
         set theViewOptions to the icon view options of container window
         set arrangement of theViewOptions to not arranged
         set icon size of theViewOptions to 80
-        set position of item "PyCal.app" of container window to {120, 180}
-        set position of item "Applications" of container window to {360, 180}
-        set position of item "首次打开.command" of container window to {560, 140}
-        set position of item "安装到个人目录.app" of container window to {560, 260}
-        set position of item "使用说明.txt" of container window to {720, 180}
+        set position of item "PyCal.app" of container window to {140, 180}
+        set position of item "Applications" of container window to {400, 180}
         close
         open
         update without registering applications

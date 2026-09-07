@@ -36,7 +36,7 @@ git push origin v0.1.0
 ```
 
 - **配齐** Developer ID `.p12` 和 App Store Connect API 密钥之后：产物会签名、公证并 staple，同事从浏览器下载后应能把 App 拖进 Applications 再双击打开。不要关 Gatekeeper。
-- **没有** 这些 secrets：仍会发布 DMG，但 **不能** 当成「双击就能开」。下载会带 `com.apple.quarantine`，需要盘里的「首次打开.command」、右键打开，或对这一份 App 做 `xattr`。Release 说明会写明这一点。
+- **没有** 这些 secrets：仍会发布 DMG，但 **不能** 当成「双击就能开」。下载会带 `com.apple.quarantine`，需要右键打开，或对这一份 App 做 `xattr`。Release 说明会写明这一点。
 
 Secrets、为什么有的机器能开有的不能、以及公证失败时查什么，见 [docs/release.md](docs/release.md)。本流程不做 iOS / App Store 上架。
 

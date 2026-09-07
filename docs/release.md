@@ -2,7 +2,7 @@
 
 推送符合 `vX.Y.Z` 的 git tag 后，`.github/workflows/release-dmg.yml` 会在 `macos-latest` 上构建 `PyCal.app`、打成 `PyCal-X.Y.Z.dmg`，并挂到 GitHub Release。
 
-**真正能让同事下载后双击打开的，只有 Developer ID 签名 + Apple 公证（notarization）+ staple。** 没有配齐 secrets 时，workflow 仍会发布 **未公证** 的 DMG，Release 说明会写明：Gatekeeper 仍会拦截，需要「首次打开」或右键打开，**不要**宣称可以双击。
+**真正能让同事下载后双击打开的，只有 Developer ID 签名 + Apple 公证（notarization）+ staple。** 没有配齐 secrets 时，workflow 仍会发布 **未公证** 的 DMG，Release 说明会写明：Gatekeeper 仍会拦截，需要右键打开或对本份 App 做 `xattr`，**不要**宣称可以双击。
 
 不要关闭 Gatekeeper，也不要关 SIP。
 
@@ -24,7 +24,7 @@ open ~/Downloads/PyCal.app
 | 未签名、临时签名（ad-hoc）、或用了 **Apple Development** 而不是 **Developer ID Application** | 带 quarantine 时被拒，提示已损坏 / 无法验证开发者。 |
 | 有 Developer ID，但 **没公证** 或 **没 staple** 且当时连不上 Apple | 仍会被拒。公证 ticket 在 Apple 侧；staple 把 ticket 钉进 DMG/App，离线也能过。 |
 | 从 DMG 里用 Finder 拖出 `.app` | 会 **继承** DMG 的 quarantine。未公证时，拖到 `~/Applications` 再双击照样拦截。 |
-| 已经右键「打开」过，或跑过「首次打开.command」 | 这一份副本的隔离被清掉或已有用户同意，所以「以后就能开」。 |
+| 已经右键「打开」过，或对本份 App 做过 `xattr` | 这一份副本的隔离被清掉或已有用户同意，所以「以后就能开」。 |
 
 `xattr -cr` 的作用是去掉 **这一份文件** 上的 `com.apple.quarantine`，不是关闭系统安全策略。同事机器上「必须 xattr 才能开」= 产物没有过公证，只是隔离评估没过。
 
@@ -83,7 +83,7 @@ base64 -i DeveloperID.p12 | pbcopy    # Intel / 旧 macOS 也可能是 base64 -i
 base64 < DeveloperID.p12 | pbcopy
 ```
 
-CI 会把证书导入临时钥匙串，并用 `Developer ID Application` 身份给 App、安装助手和 DMG 签名（Hardened Runtime + timestamp）。
+CI 会把证书导入临时钥匙串，并用 `Developer ID Application` 身份给 App 和 DMG 签名（Hardened Runtime + timestamp）。
 
 ### 公证（推荐 App Store Connect API 密钥）
 
@@ -105,12 +105,12 @@ NOTARY_PROFILE=pycal-notary ./Scripts/make-macos-dmg.sh Build/PyCal.app Build
 
 | 仓库 secrets | 行为 |
 | --- | --- |
-| 全部为空 | 打 **未签名** DMG，Release 带警告。同事仍需「首次打开」/ 右键打开 / `xattr`。 |
+| 全部为空 | 打 **未签名** DMG，Release 带警告。同事仍需右键打开 / `xattr`。 |
 | 签名 + 公证六项都齐 | 签名 App → 公证并 staple App → 打 DMG → 签名、公证并 staple DMG。这是「双击就能开」的路径。 |
 | 只配了一部分 | **失败**，避免发出版本却误以为已公证。 |
 | 只有 Developer ID、没有公证密钥 | CI **失败**。签过名但没公证的下载照样拦。本地或刻意覆盖可设 `ALLOW_SIGNED_WITHOUT_NOTARY=1`。 |
 
-未公证的 DMG 里仍有「首次打开.command」和「安装到个人目录.app」，只作为 **后备**：把这一份 App 拷到 `~/Applications` 并去掉它的 quarantine。公证成功后，正常路径是把 App 拖到 DMG 里的 **Applications** 符号链接。
+公证成功后，把 App 拖到 DMG 里的 **Applications** 符号链接即可。未公证的 DMG 同样只有 App 和该链接；不要关 Gatekeeper，对本份 App 右键打开或 `xattr`。仓库里的 `Scripts/首次打开.command` 和 `Scripts/InstallToUserApplications.applescript` 只供本机调试，**不会**打进发布 DMG。
 
 ## 公证 / 双击仍失败时查什么
 
@@ -122,15 +122,13 @@ NOTARY_PROFILE=pycal-notary ./Scripts/make-macos-dmg.sh Build/PyCal.app Build
 - **`notarytool` 网络**：runner 要能访问 Apple 公证服务；失败日志里有 RequestID，用 `xcrun notarytool log` 看具体拒因。
 - **没 staple**：公证过了但没钉票，离线或刚下载时仍可能失败。workflow 在 App 和 DMG 上都会 `stapler staple`。
 - **公司 MDM / 限制模式**：个别机器即使用户打开公证过的 App 也会被策略拦截。这不是再清一遍 xattr 能解决的，需要 IT。
-- **把 `.app` 从「隔离的」未公证 DMG 里拖出来**：quarantine 会跟着走。要么发公证版，要么用盘里的首次打开脚本。
+- **把 `.app` 从「隔离的」未公证 DMG 里拖出来**：quarantine 会跟着走。要么发公证版，要么对本份 App 右键打开或 `xattr`。
 - **iOS / App Store**：本流程只做 macOS 直接分发。不上传 App Store Connect，也不打 iOS ipa。
 
 ## DMG 里有什么
 
 - `PyCal.app` — 版本号来自 tag。
 - `Applications` — 指向 `/Applications` 的符号链接，拖进去安装。
-- `首次打开.command`、`安装到个人目录.app` — 仅后备；只处理这一份 App 的隔离标记。
-- `使用说明.txt` — 按是否公证写成不同说明，不会让用户关 Gatekeeper。
 
 脚本：
 
