@@ -1,0 +1,175 @@
+name: Release macOS DMG
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      skip_release:
+        description: Build the DMG without creating a GitHub Release
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  dmg:
+    runs-on: macos-latest
+    env:
+      DEVELOPER_ID_P12_BASE64: ${{ secrets.DEVELOPER_ID_P12_BASE64 }}
+      DEVELOPER_ID_P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+      APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+      APP_STORE_CONNECT_API_KEY_P8: ${{ secrets.APP_STORE_CONNECT_API_KEY_P8 }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve version from tag
+        id: version
+        run: |
+          set -euo pipefail
+          source Scripts/lib-macos-release.sh
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            if [[ ! "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+              echo "Tag must look like v0.1.0 (got ${GITHUB_REF_NAME})" >&2
+              exit 1
+            fi
+          fi
+          version="$(pycal_resolve_version "$GITHUB_WORKSPACE")"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "PYCAL_VERSION=$version" >> "$GITHUB_ENV"
+          echo "PYCAL_BUILD=$version" >> "$GITHUB_ENV"
+          echo "Release version: $version"
+
+      - name: Decide signing / notarization mode
+        id: creds
+        run: |
+          set -euo pipefail
+          source Scripts/lib-macos-release.sh
+          mode="$(pycal_release_mode)"
+          echo "mode=$mode" >> "$GITHUB_OUTPUT"
+          echo "PYCAL_RELEASE_MODE=$mode" >> "$GITHUB_ENV"
+          case "$mode" in
+            notarized)
+              echo "Secrets complete: will Developer ID sign, notarize, and staple."
+              ;;
+            signing)
+              echo "Signing only (local/opt-in). Downloads will still be Gatekeeper-blocked."
+              ;;
+            unsigned)
+              echo "No signing secrets. Publishing an unsigned DMG with a Gatekeeper warning."
+              echo "ALLOW_UNSIGNED_DMG=1" >> "$GITHUB_ENV"
+              ;;
+            *)
+              echo "Unexpected mode: $mode" >&2
+              exit 1
+              ;;
+          esac
+
+      - name: Import Developer ID certificate
+        if: steps.creds.outputs.mode != 'unsigned'
+        run: Scripts/ci-import-signing.sh
+
+      - name: Build PyCal.app
+        run: Scripts/build-macos-app.sh
+
+      - name: Package DMG
+        id: dmg
+        run: Scripts/make-macos-dmg.sh "$GITHUB_WORKSPACE/Build/PyCal.app" "$GITHUB_WORKSPACE/Build"
+
+      - name: Checksum
+        id: sum
+        run: |
+          set -euo pipefail
+          dmg="Build/PyCal-${{ steps.version.outputs.version }}.dmg"
+          if [[ ! -f "$dmg" ]]; then
+            echo "Expected $dmg" >&2
+            ls -la Build || true
+            exit 1
+          fi
+          checksum="$(shasum -a 256 "$dmg" | awk '{print $1}')"
+          echo "sha256=$checksum" >> "$GITHUB_OUTPUT"
+          echo "dmg=$dmg" >> "$GITHUB_OUTPUT"
+          echo "SHA-256 $checksum  $dmg"
+
+      - name: Write release notes
+        run: |
+          set -euo pipefail
+          version="${{ steps.version.outputs.version }}"
+          mode="${{ steps.creds.outputs.mode }}"
+          checksum="${{ steps.sum.outputs.sha256 }}"
+          notes="$RUNNER_TEMP/release-notes.md"
+          {
+            echo "## PyCal ${version}"
+            echo
+            if [[ "$mode" == "notarized" ]]; then
+              echo "This macOS disk image is **Developer ID signed, notarized, and stapled**."
+              echo "Download \`PyCal-${version}.dmg\`, open it, drag **PyCal** onto **Applications**, then double-click."
+              echo
+              echo "You do not need to disable Gatekeeper. You should not need \`xattr\`."
+            else
+              echo "> **Not double-click-open.** This build is **not notarized** (\`${mode}\`)."
+              echo "> Safari / Chrome / Slack downloads get \`com.apple.quarantine\`; Gatekeeper will block a plain double-click."
+              echo
+              echo "Do **not** turn off Gatekeeper. Use one of these instead:"
+              echo
+              echo "1. Open the DMG and run **首次打开.command** (if macOS says it came from the internet, choose Open)."
+              echo "2. Select \`PyCal.app\`, Control-click → **Open**."
+              echo "3. \`xattr -d com.apple.quarantine ~/Applications/PyCal.app\` then \`open ~/Applications/PyCal.app\`."
+              echo
+              echo "For a colleague-safe double-click build, add the Developer ID and App Store Connect secrets documented in \`docs/release.md\` and push the tag again."
+            fi
+            echo
+            echo "\`\`\`"
+            echo "SHA-256  ${checksum}"
+            echo "PyCal-${version}.dmg"
+            echo "\`\`\`"
+            echo
+            echo "iOS / App Store submission is out of scope for this release."
+          } > "$notes"
+          echo "RELEASE_NOTES=$notes" >> "$GITHUB_ENV"
+
+      - name: Publish GitHub Release
+        if: github.ref_type == 'tag' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.skip_release != true))
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          version="${{ steps.version.outputs.version }}"
+          dmg="${{ steps.sum.outputs.dmg }}"
+          notes="$RELEASE_NOTES"
+          if [[ "${GITHUB_REF_TYPE}" != "tag" ]]; then
+            echo "Refusing to invent a tag from a branch dispatch. Push vX.Y.Z." >&2
+            exit 1
+          fi
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" "$dmg" --clobber
+            gh release edit "$tag" --title "PyCal $version" --notes-file "$notes"
+          else
+            gh release create "$tag" "$dmg" --title "PyCal $version" --notes-file "$notes"
+          fi
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PyCal-${{ steps.version.outputs.version }}.dmg
+          path: ${{ steps.sum.outputs.dmg }}
+          if-no-files-found: error
+
+      - name: Delete temporary signing keychain
+        if: always() && steps.creds.outputs.mode != 'unsigned'
+        run: |
+          if [[ -n "${PYCAL_KEYCHAIN_PATH:-}" ]]; then
+            security delete-keychain "$PYCAL_KEYCHAIN_PATH" || true
+          fi

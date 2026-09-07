@@ -1,26 +1,31 @@
-#!/bin/zsh
+#!/bin/bash
+# Build PyCal.app, copy it to Applications, and open it. For local development.
 set -euo pipefail
 
-root_dir="$(cd "$(dirname "$0")/.." && pwd)"
+script_dir="$(cd "$(dirname "$0")" && pwd)"
+root_dir="$(cd "$script_dir/.." && pwd)"
 app_dir="$root_dir/Build/PyCal.app"
+
+"$script_dir/build-macos-app.sh"
+
+if [[ ! -d "$app_dir" ]]; then
+    echo "Build did not produce $app_dir" >&2
+    exit 1
+fi
+
 installed_app_dir="/Applications/PyCal.app"
-binary="$root_dir/.build/arm64-apple-macosx/release/PyCal"
-resource_bundle="$root_dir/.build/arm64-apple-macosx/release/PyCal_PyCal.bundle"
-
-echo "Building PyCal (release)…"
-swift build -c release --package-path "$root_dir"
-
-rm -rf "$app_dir"
-mkdir -p "$app_dir/Contents/MacOS"
-mkdir -p "$app_dir/Contents/Resources"
-cp "$binary" "$app_dir/Contents/MacOS/PyCal"
-cp "$root_dir/Scripts/PyCal-Info.plist" "$app_dir/Contents/Info.plist"
-cp "$root_dir/Sources/PyCal/Resources/PyCalIcon.icns" "$app_dir/Contents/Resources/PyCalIcon.icns"
-ditto "$resource_bundle" "$app_dir/PyCal_PyCal.bundle"
+if [[ ! -w /Applications ]]; then
+    mkdir -p "$HOME/Applications"
+    installed_app_dir="$HOME/Applications/PyCal.app"
+    echo "/Applications is not writable; installing to $installed_app_dir"
+fi
 
 echo "Installing $installed_app_dir"
 rm -rf "$installed_app_dir"
-ditto "$app_dir" "$installed_app_dir"
+ditto --norsrc --noqtn "$app_dir" "$installed_app_dir"
+if command -v xattr >/dev/null 2>&1; then
+    xattr -dr com.apple.quarantine "$installed_app_dir" 2>/dev/null || true
+fi
 
 echo "Opening $installed_app_dir"
 open "$installed_app_dir"

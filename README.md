@@ -19,12 +19,26 @@ swift run PyCal
 ./Scripts/run-macos.sh
 ```
 
-脚本会生成 `Build/PyCal.app`，安装到 `/Applications/PyCal.app`，并用 macOS 的 `open` 打开已安装版本。也可以在 Xcode 中打开 `Package.swift` 或 `PyCal.xcodeproj` 运行。构建：
+脚本会生成 `Build/PyCal.app`，安装到 `/Applications/PyCal.app`（没有写权限时改到 `~/Applications`），并用 macOS 的 `open` 打开已安装版本。也可以在 Xcode 中打开 `Package.swift` 或 `PyCal.xcodeproj` 运行。构建：
 
 ```sh
 swift build
 swift test
 ```
+
+### 发布 macOS DMG
+
+推送 `vX.Y.Z` tag 后，GitHub Actions 会构建 `.app`、打包 `PyCal-X.Y.Z.dmg` 并挂到 [GitHub Release](https://github.com/liuzhuoling2011/PyCal/releases)：
+
+```sh
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+- **配齐** Developer ID `.p12` 和 App Store Connect API 密钥之后：产物会签名、公证并 staple，同事从浏览器下载后应能把 App 拖进 Applications 再双击打开。不要关 Gatekeeper。
+- **没有** 这些 secrets：仍会发布 DMG，但 **不能** 当成「双击就能开」。下载会带 `com.apple.quarantine`，需要盘里的「首次打开.command」、右键打开，或对这一份 App 做 `xattr`。Release 说明会写明这一点。
+
+Secrets、为什么有的机器能开有的不能、以及公证失败时查什么，见 [docs/release.md](docs/release.md)。本流程不做 iOS / App Store 上架。
 
 ### 装到自己的 iPhone
 
