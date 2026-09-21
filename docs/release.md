@@ -1,5 +1,7 @@
 # macOS 发布（GitHub Release + DMG）
 
+> **Flutter 多平台产物走另一条 workflow。** 同一个 `vX.Y.Z` tag 还会触发 [`.github/workflows/flutter-release.yml`](../.github/workflows/flutter-release.yml)：先跑 analyze / test，再并行构建 Web、Linux x64、Windows x64、未签名 macOS zip、debug 签名的 Android APK，以及 best-effort 的未签名 iOS，并上传到**同一个** GitHub Release。它只用 `gh release upload --clobber` 覆盖同名文件，**不会删除**本流程的 `PyCal-X.Y.Z.dmg`。后结束的 workflow 可能会改写 Release 正文。本文其余部分只描述遗留 Swift DMG。
+
 推送符合 `vX.Y.Z` 的 git tag 后，`.github/workflows/release-dmg.yml` 会在 `macos-latest` 上构建 `PyCal.app`、打成 `PyCal-X.Y.Z.dmg`，并挂到 GitHub Release。
 
 **真正能让同事下载后双击打开的，只有 Developer ID 签名 + Apple 公证（notarization）+ staple。** 没有配齐 secrets 时，workflow 仍会发布 **未公证** 的 DMG，Release 说明会写明：Gatekeeper 仍会拦截，需要右键打开或对本份 App 做 `xattr`，**不要**宣称可以双击。

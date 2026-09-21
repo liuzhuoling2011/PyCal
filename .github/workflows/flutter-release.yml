@@ -1,0 +1,677 @@
+# Flutter multi-platform release.
+#
+# Pushing a vX.Y.Z tag (or running this workflow manually with that tag)
+# analyzes and tests once, then builds Web, Linux, Windows, macOS, Android,
+# and unsigned iOS in parallel. The publish job attaches those artifacts to
+# the GitHub Release for the tag.
+#
+# The legacy Swift DMG workflow (.github/workflows/release-dmg.yml) also runs
+# on v*.*.* tags. This file does not modify it. Publish only uploads Flutter
+# assets with `gh release upload --clobber`, which replaces files of the same
+# name and leaves every other asset in place, including PyCal-<version>.dmg.
+
+name: Flutter release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to build (for example v0.2.1). The workflow checks out this tag, not the branch you started from."
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: flutter-release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+  cancel-in-progress: false
+
+env:
+  PYCAL_BUILD_NUMBER: ${{ github.run_number }}
+
+jobs:
+  quality:
+    name: Analyze and test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      build_name: ${{ steps.version.outputs.build_name }}
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+
+      - name: Resolve version from tag
+        id: version
+        env:
+          PYCAL_TAG_INPUT: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || '' }}
+        run: |
+          set -euo pipefail
+          if [[ -n "${PYCAL_TAG_INPUT}" ]]; then
+            tag="${PYCAL_TAG_INPUT}"
+          else
+            tag="${GITHUB_REF_NAME}"
+          fi
+          tag="${tag#refs/tags/}"
+          tag="$(printf '%s' "${tag}" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+          if [[ ! "${tag}" =~ ^v([0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?)$ ]]; then
+            echo "Tag must look like v0.2.1 or v0.2.1-rc.1 (got: ${tag})." >&2
+            echo "Push a v*.*.* tag, or run this workflow manually with the tag input set." >&2
+            exit 1
+          fi
+          version="${BASH_REMATCH[1]}"
+          build_name="${version%%[-+]*}"
+          {
+            echo "version=${version}"
+            echo "build_name=${build_name}"
+            echo "tag=${tag}"
+          } >> "${GITHUB_OUTPUT}"
+          echo "Release version ${version} (tag ${tag}, build name ${build_name}, build number ${PYCAL_BUILD_NUMBER})"
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Analyze
+        run: flutter analyze --no-fatal-infos
+
+      - name: Test
+        run: flutter test
+
+  web:
+    name: Web
+    needs: quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      PYCAL_VERSION: ${{ needs.quality.outputs.version }}
+      PYCAL_BUILD_NAME: ${{ needs.quality.outputs.build_name }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build web
+        run: |
+          set -euo pipefail
+          flutter build web --release \
+            --build-name="${PYCAL_BUILD_NAME}" \
+            --build-number="${PYCAL_BUILD_NUMBER}"
+          test -f build/web/index.html
+          tar -C build/web -czf "PyCal-${PYCAL_VERSION}-web.tar.gz" .
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PyCal-${{ needs.quality.outputs.version }}-web
+          path: PyCal-${{ needs.quality.outputs.version }}-web.tar.gz
+          if-no-files-found: error
+          compression-level: 0
+
+  linux:
+    name: Linux x64
+    needs: quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      PYCAL_VERSION: ${{ needs.quality.outputs.version }}
+      PYCAL_BUILD_NAME: ${{ needs.quality.outputs.build_name }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+
+      - name: Install Linux desktop dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            clang \
+            cmake \
+            ninja-build \
+            pkg-config \
+            libgtk-3-dev \
+            liblzma-dev
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: |
+          set -euo pipefail
+          flutter config --enable-linux-desktop
+          flutter pub get
+
+      - name: Build Linux
+        run: |
+          set -euo pipefail
+          flutter build linux --release \
+            --build-name="${PYCAL_BUILD_NAME}" \
+            --build-number="${PYCAL_BUILD_NUMBER}"
+          bundle="build/linux/x64/release/bundle"
+          if [[ ! -f "${bundle}/pycal" ]]; then
+            echo "Expected ${bundle}/pycal" >&2
+            find build/linux -maxdepth 5 -type f >&2 || true
+            exit 1
+          fi
+          tar -C "${bundle}" -czf "PyCal-${PYCAL_VERSION}-linux-x64.tar.gz" .
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PyCal-${{ needs.quality.outputs.version }}-linux-x64
+          path: PyCal-${{ needs.quality.outputs.version }}-linux-x64.tar.gz
+          if-no-files-found: error
+          compression-level: 0
+
+  windows:
+    name: Windows x64
+    needs: quality
+    runs-on: windows-latest
+    timeout-minutes: 60
+    env:
+      PYCAL_VERSION: ${{ needs.quality.outputs.version }}
+      PYCAL_BUILD_NAME: ${{ needs.quality.outputs.build_name }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+
+      - name: Enable Windows symlink support
+        run: |
+          set -euo pipefail
+          # Flutter plugins are linked with symlinks. GitHub-hosted runners are
+          # administrators, so this turns on the developer-mode privilege.
+          reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock" /t REG_DWORD /f /v "AllowDevelopmentWithoutDevLicense" /d "1"
+          reg add "HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock" /t REG_DWORD /f /v "AllowDevelopmentWithoutDevLicense" /d "1"
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: |
+          set -euo pipefail
+          flutter config --enable-windows-desktop
+          flutter pub get
+
+      - name: Build Windows
+        run: |
+          set -euo pipefail
+          flutter build windows --release \
+            --build-name="${PYCAL_BUILD_NAME}" \
+            --build-number="${PYCAL_BUILD_NUMBER}"
+
+      - name: Zip Windows bundle
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $src = Join-Path (Get-Location) "build/windows/x64/runner/Release"
+          $exe = Join-Path $src "pycal.exe"
+          if (-not (Test-Path -LiteralPath $exe)) {
+            Get-ChildItem -Recurse -ErrorAction SilentlyContinue build | Select-Object -ExpandProperty FullName
+            throw "Expected $exe"
+          }
+          $dest = Join-Path (Get-Location) "PyCal-$env:PYCAL_VERSION-windows-x64.zip"
+          if (Test-Path -LiteralPath $dest) {
+            Remove-Item -LiteralPath $dest -Force
+          }
+          Compress-Archive -Path (Join-Path $src "*") -DestinationPath $dest
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PyCal-${{ needs.quality.outputs.version }}-windows-x64
+          path: PyCal-${{ needs.quality.outputs.version }}-windows-x64.zip
+          if-no-files-found: error
+          compression-level: 0
+
+  macos:
+    name: macOS
+    needs: quality
+    runs-on: macos-latest
+    timeout-minutes: 60
+    env:
+      PYCAL_VERSION: ${{ needs.quality.outputs.version }}
+      PYCAL_BUILD_NAME: ${{ needs.quality.outputs.build_name }}
+      LANG: en_US.UTF-8
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: |
+          set -euo pipefail
+          flutter config --enable-macos-desktop
+          flutter pub get
+
+      - name: Build macOS
+        run: |
+          set -euo pipefail
+          # Ad-hoc identity "-" is already the Xcode Release setting. No
+          # Developer ID or notarization secrets are required. Gatekeeper still
+          # blocks a normal double-click after this zip is downloaded.
+          flutter build macos --release \
+            --build-name="${PYCAL_BUILD_NAME}" \
+            --build-number="${PYCAL_BUILD_NUMBER}"
+          app="build/macos/Build/Products/Release/PyCal.app"
+          if [[ ! -d "${app}" ]]; then
+            echo "Expected ${app}" >&2
+            find build/macos -maxdepth 6 -type d -name '*.app' >&2 || true
+            exit 1
+          fi
+          ditto -c -k --keepParent "${app}" "PyCal-${PYCAL_VERSION}-macos.zip"
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PyCal-${{ needs.quality.outputs.version }}-macos
+          path: PyCal-${{ needs.quality.outputs.version }}-macos.zip
+          if-no-files-found: error
+          compression-level: 0
+
+  android:
+    name: Android APK
+    needs: quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      PYCAL_VERSION: ${{ needs.quality.outputs.version }}
+      PYCAL_BUILD_NAME: ${{ needs.quality.outputs.build_name }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build release APK
+        run: |
+          set -euo pipefail
+          # android/gradle.properties requests an 8G Gradle heap for local
+          # builds. GitHub-hosted runners cannot give the daemon that much
+          # RAM, so lower it for this job only. The debug signingConfig in
+          # android/app/build.gradle.kts is intentional: there is no Play
+          # upload key in CI.
+          props="android/gradle.properties"
+          tmp="$(mktemp)"
+          awk '
+            BEGIN { replaced = 0 }
+            /^org\.gradle\.jvmargs=/ {
+              print "org.gradle.jvmargs=-Xmx2G -XX:MaxMetaspaceSize=512m -XX:ReservedCodeCacheSize=256m -XX:+HeapDumpOnOutOfMemoryError"
+              replaced = 1
+              next
+            }
+            { print }
+            END { if (replaced != 1) exit 1 }
+          ' "${props}" > "${tmp}"
+          mv "${tmp}" "${props}"
+
+          sdk="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+          if [[ -n "${sdk}" && -x "${sdk}/cmdline-tools/latest/bin/sdkmanager" ]]; then
+            yes | "${sdk}/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          fi
+
+          # android/gradlew is gitignored by the Flutter template. flutter
+          # build apk regenerates the wrapper from the SDK.
+          flutter build apk --release \
+            --build-name="${PYCAL_BUILD_NAME}" \
+            --build-number="${PYCAL_BUILD_NUMBER}"
+
+          apk=""
+          for candidate in \
+            build/app/outputs/flutter-apk/app-release.apk \
+            build/app/outputs/apk/release/app-release.apk
+          do
+            if [[ -f "${candidate}" ]]; then
+              apk="${candidate}"
+              break
+            fi
+          done
+          if [[ -z "${apk}" ]]; then
+            echo "Release APK not found" >&2
+            find build/app/outputs -type f -name '*.apk' >&2 || true
+            exit 1
+          fi
+          cp "${apk}" "PyCal-${PYCAL_VERSION}-android.apk"
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PyCal-${{ needs.quality.outputs.version }}-android
+          path: PyCal-${{ needs.quality.outputs.version }}-android.apk
+          if-no-files-found: error
+          compression-level: 0
+
+  ios:
+    name: iOS unsigned
+    needs: quality
+    runs-on: macos-latest
+    timeout-minutes: 60
+    # The build uses --no-codesign and should succeed without an Apple team.
+    # If Xcode or CocoaPods still fails, keep the other platform artifacts.
+    continue-on-error: true
+    env:
+      PYCAL_VERSION: ${{ needs.quality.outputs.version }}
+      PYCAL_BUILD_NAME: ${{ needs.quality.outputs.build_name }}
+      LANG: en_US.UTF-8
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build unsigned iOS
+        run: |
+          set -euo pipefail
+          flutter build ios --release --no-codesign \
+            --build-name="${PYCAL_BUILD_NAME}" \
+            --build-number="${PYCAL_BUILD_NUMBER}"
+          app=""
+          for candidate in \
+            build/ios/iphoneos/Runner.app \
+            build/ios/Release-iphoneos/Runner.app
+          do
+            if [[ -d "${candidate}" ]]; then
+              app="${candidate}"
+              break
+            fi
+          done
+          if [[ -z "${app}" ]]; then
+            echo "Runner.app not found" >&2
+            find build/ios -maxdepth 4 -type d -name '*.app' >&2 || true
+            exit 1
+          fi
+          ditto -c -k --keepParent "${app}" "PyCal-${PYCAL_VERSION}-ios-unsigned.zip"
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PyCal-${{ needs.quality.outputs.version }}-ios-unsigned
+          path: PyCal-${{ needs.quality.outputs.version }}-ios-unsigned.zip
+          if-no-files-found: error
+          compression-level: 0
+
+  publish:
+    name: Publish GitHub Release
+    needs: [quality, web, linux, windows, macos, android, ios]
+    if: >-
+      always() &&
+      needs.quality.result == 'success' &&
+      needs.web.result == 'success' &&
+      needs.linux.result == 'success' &&
+      needs.windows.result == 'success' &&
+      needs.macos.result == 'success' &&
+      needs.android.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      actions: read
+      contents: write
+    env:
+      PYCAL_VERSION: ${{ needs.quality.outputs.version }}
+      PYCAL_BUILD_NAME: ${{ needs.quality.outputs.build_name }}
+      PYCAL_TAG: ${{ needs.quality.outputs.tag }}
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: PyCal-*
+          path: dist
+          merge-multiple: true
+
+      - name: Upload assets and write release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+
+          mapfile -t files < <(find dist -maxdepth 1 -type f | sort)
+          if [[ ${#files[@]} -eq 0 ]]; then
+            echo "No release files downloaded into dist/" >&2
+            find dist -maxdepth 3 -type f >&2 || true
+            exit 1
+          fi
+
+          declare -A checksums=()
+          for file in "${files[@]}"; do
+            name="$(basename "${file}")"
+            checksums["${name}"]="$(sha256sum "${file}" | awk '{print $1}')"
+          done
+
+          required=(
+            "PyCal-${PYCAL_VERSION}-web.tar.gz"
+            "PyCal-${PYCAL_VERSION}-linux-x64.tar.gz"
+            "PyCal-${PYCAL_VERSION}-windows-x64.zip"
+            "PyCal-${PYCAL_VERSION}-macos.zip"
+            "PyCal-${PYCAL_VERSION}-android.apk"
+          )
+          for name in "${required[@]}"; do
+            if [[ -z "${checksums[${name}]+x}" ]]; then
+              echo "Missing required artifact ${name}" >&2
+              printf '%s\n' "${!checksums[@]}" >&2
+              exit 1
+            fi
+          done
+
+          preexisting="${RUNNER_TEMP}/preexisting.txt"
+          if gh release view "${PYCAL_TAG}" >/dev/null 2>&1; then
+            gh release view "${PYCAL_TAG}" --json assets --jq '.assets[].name' | sort > "${preexisting}"
+          else
+            : > "${preexisting}"
+          fi
+
+          describe() {
+            case "$1" in
+              *-web.tar.gz)
+                echo "Static website from flutter build web. Unpack the archive and serve that directory."
+                ;;
+              *-linux-x64.tar.gz)
+                echo "Linux x64 release bundle. Unpack it and run ./pycal."
+                ;;
+              *-windows-x64.zip)
+                echo "Windows x64 release build. Unsigned. SmartScreen may warn on first launch."
+                ;;
+              *-macos.zip)
+                echo "Flutter macOS PyCal.app, ad-hoc signed only. Gatekeeper blocks a normal double-click on a browser download. Control-click the app and choose Open, or clear quarantine on that copy with: xattr -dr com.apple.quarantine PyCal.app. This zip is not a notarized disk image."
+                ;;
+              *-android.apk)
+                echo "Android release APK signed with the debug keystore. No Play upload key is configured. Sideload only; not acceptable to the Play Store."
+                ;;
+              *-ios-unsigned.zip)
+                echo "Unsigned iOS Runner.app from flutter build ios --release --no-codesign. Not installable on a device. App Store signing is out of scope."
+                ;;
+              *.dmg)
+                echo "Legacy Swift macOS disk image from release-dmg.yml. This workflow does not replace or delete it. Developer ID signing and notarization are described in docs/release.md."
+                ;;
+              *)
+                echo "Existing release asset. This workflow does not delete it."
+                ;;
+            esac
+          }
+
+          notes="${RUNNER_TEMP}/flutter-release-notes.md"
+          seen="${RUNNER_TEMP}/seen-assets.txt"
+          : > "${seen}"
+          {
+            echo "## PyCal ${PYCAL_VERSION}"
+            echo
+            echo "Flutter multi-platform build from tag ${PYCAL_TAG}."
+            echo
+            echo "These artifacts do not use an Apple Developer ID or a Play upload key. Unsigned and debug-signed files are intentional."
+            echo
+            echo "The legacy Swift workflow (.github/workflows/release-dmg.yml) may also attach PyCal-${PYCAL_VERSION}.dmg to this same release. Uploading here uses gh release upload --clobber, which replaces only files of the same name."
+            echo
+            echo "| Asset | SHA-256 | Notes |"
+            echo "| --- | --- | --- |"
+          } > "${notes}"
+
+          emit() {
+            local name="$1"
+            local sum note
+            if [[ -n "${checksums[${name}]+x}" ]]; then
+              sum="${checksums[${name}]}"
+            else
+              sum="n/a"
+            fi
+            note="$(describe "${name}")"
+            printf '| %s | %s | %s |\n' "\`${name}\`" "\`${sum}\`" "${note}" >> "${notes}"
+            printf '%s\n' "${name}" >> "${seen}"
+          }
+
+          preferred=(
+            "PyCal-${PYCAL_VERSION}-web.tar.gz"
+            "PyCal-${PYCAL_VERSION}-linux-x64.tar.gz"
+            "PyCal-${PYCAL_VERSION}-windows-x64.zip"
+            "PyCal-${PYCAL_VERSION}-macos.zip"
+            "PyCal-${PYCAL_VERSION}-android.apk"
+            "PyCal-${PYCAL_VERSION}-ios-unsigned.zip"
+            "PyCal-${PYCAL_VERSION}.dmg"
+          )
+          for name in "${preferred[@]}"; do
+            if [[ -n "${checksums[${name}]+x}" ]] || grep -Fxq "${name}" "${preexisting}"; then
+              emit "${name}"
+            fi
+          done
+          while IFS= read -r name || [[ -n "${name}" ]]; do
+            [[ -z "${name}" ]] && continue
+            if ! grep -Fxq "${name}" "${seen}"; then
+              emit "${name}"
+            fi
+          done < <(printf '%s\n' "${!checksums[@]}" | sort)
+          while IFS= read -r name || [[ -n "${name}" ]]; do
+            [[ -z "${name}" ]] && continue
+            if ! grep -Fxq "${name}" "${seen}"; then
+              emit "${name}"
+            fi
+          done < "${preexisting}"
+
+          ios_name="PyCal-${PYCAL_VERSION}-ios-unsigned.zip"
+          if [[ -z "${checksums[${ios_name}]+x}" ]]; then
+            {
+              echo
+              echo "The unsigned iOS build did not produce ${ios_name} on this run. The other platforms were still published. App Store signing is out of scope."
+            } >> "${notes}"
+          fi
+          {
+            echo
+            echo "Version ${PYCAL_BUILD_NAME} is passed to Flutter as --build-name. pubspec.yaml on the branch is not rewritten."
+            echo
+            echo "Built by .github/workflows/flutter-release.yml: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          } >> "${notes}"
+
+          release_upload() {
+            local attempt
+            for attempt in 1 2 3 4 5; do
+              if gh release upload "${PYCAL_TAG}" "$@" --clobber; then
+                return 0
+              fi
+              echo "gh release upload failed (attempt ${attempt}); retrying in $((attempt * 5))s" >&2
+              sleep $((attempt * 5))
+            done
+            echo "gh release upload failed after retries" >&2
+            return 1
+          }
+
+          if gh release view "${PYCAL_TAG}" >/dev/null 2>&1; then
+            release_upload "${files[@]}"
+          else
+            create_args=(--title "PyCal ${PYCAL_VERSION}" --notes-file "${notes}")
+            if [[ "${PYCAL_VERSION}" == *-* ]]; then
+              create_args+=(--prerelease)
+            fi
+            if ! gh release create "${PYCAL_TAG}" "${create_args[@]}" "${files[@]}"; then
+              # The legacy DMG workflow may have created the release first.
+              release_upload "${files[@]}"
+            fi
+          fi
+          edit_args=(--title "PyCal ${PYCAL_VERSION}" --notes-file "${notes}")
+          if [[ "${PYCAL_VERSION}" == *-* ]]; then
+            edit_args+=(--prerelease)
+          fi
+          gh release edit "${PYCAL_TAG}" "${edit_args[@]}"
+
+          listed="${RUNNER_TEMP}/listed-assets.txt"
+          gh release view "${PYCAL_TAG}" --json assets --jq '.assets[].name' | sort > "${listed}"
+          missing=0
+          for file in "${files[@]}"; do
+            name="$(basename "${file}")"
+            if ! grep -Fxq "${name}" "${listed}"; then
+              echo "Uploaded file is missing from the release: ${name}" >&2
+              missing=1
+            fi
+          done
+          if [[ "${missing}" -ne 0 ]]; then
+            exit 1
+          fi
+
+          {
+            echo "### Published ${PYCAL_TAG}"
+            echo
+            cat "${notes}"
+          } >> "${GITHUB_STEP_SUMMARY}"
+          echo "Release: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/tag/${PYCAL_TAG}"
