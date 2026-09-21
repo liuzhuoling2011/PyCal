@@ -78,6 +78,8 @@ CI（`.github/workflows/flutter.yml`）在 Linux 上运行 `flutter pub get`、`
 
 JSON 使用 ISO-8601 时间，与旧版 Swift `JSONEncoder` 默认日期编码不兼容。从 Swift 版升级时历史不会自动导入。
 
+Web CanvasKit 使用打包的 Noto Sans SC 子集（`assets/fonts/NotoSansSC-UI.ttf`，SIL OFL）渲染中文界面文案。子集只覆盖应用标签；用户输入的罕见汉字可能要等 Flutter 引擎回退字体加载后才完整显示。
+
 ## 项目结构
 
 ```text

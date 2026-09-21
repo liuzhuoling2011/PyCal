@@ -29,7 +29,8 @@ abstract final class AppDesign {
         primary: ink,
       ),
       scaffoldBackgroundColor: canvas,
-      fontFamily: 'Roboto',
+      // Bundled Noto Sans SC subset so Chinese labels render on web CanvasKit.
+      fontFamily: 'NotoSansSC',
     );
     return base.copyWith(
       appBarTheme: const AppBarTheme(
