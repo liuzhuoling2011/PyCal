@@ -1,6 +1,6 @@
 # macOS 发布（GitHub Release + DMG）
 
-> **Flutter 多平台产物走另一条 workflow。** 同一个 `vX.Y.Z` tag 还会触发 [`.github/workflows/flutter-release.yml`](../.github/workflows/flutter-release.yml)：先跑 analyze / test，再并行构建 Web、Linux x64、Windows x64、未签名 macOS zip、debug 签名的 Android APK，以及 best-effort 的未签名 iOS，并上传到**同一个** GitHub Release。它只用 `gh release upload --clobber` 覆盖同名文件，**不会删除**本流程的 `PyCal-X.Y.Z.dmg`。后结束的 workflow 可能会改写 Release 正文。本文其余部分只描述遗留 Swift DMG。
+> **Flutter 多平台产物走另一条 workflow。** 同一个 `vX.Y.Z` tag 还会触发 [`.github/workflows/flutter-release.yml`](../.github/workflows/flutter-release.yml)：先跑 analyze / test，再并行构建 Web、Linux x64、Windows x64、未签名 macOS zip、debug 签名的 Android APK，以及 best-effort 的未签名 iOS，并上传到**同一个** GitHub Release。某一个 Flutter 平台失败时，其他已经成功的 Flutter 附件仍会上传；Web、Linux、Windows、macOS、Android 任一失败仍会让这条 workflow 变红。它只用 `gh release upload --clobber` 覆盖同名文件，**不会删除**本流程的 `PyCal-X.Y.Z.dmg`。后结束的 workflow 可能会改写 Release 正文。本文其余部分只描述遗留 Swift DMG。
 
 推送符合 `vX.Y.Z` 的 git tag 后，`.github/workflows/release-dmg.yml` 会在 `macos-latest` 上构建 `PyCal.app`、打成 `PyCal-X.Y.Z.dmg`，并挂到 GitHub Release。
 

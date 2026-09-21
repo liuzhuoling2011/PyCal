@@ -69,7 +69,7 @@ flutter analyze
 
 CI（`.github/workflows/flutter.yml`）在 push / pull request 上运行 `flutter pub get`、`flutter analyze`、`flutter test` 和 `flutter build web`。
 
-推送 `vX.Y.Z` tag 时，`.github/workflows/flutter-release.yml` 会先再跑一遍 analyze 和 test，再并行构建各平台并上传到该 tag 的 GitHub Release。见下方「发布」。
+推送 `vX.Y.Z` tag 时，`.github/workflows/flutter-release.yml` 会先再跑一遍 analyze 和 test，再并行构建各平台，并把构建成功的产物上传到该 tag 的 GitHub Release。见下方「发布」。
 
 ## 本地持久化
 
@@ -101,7 +101,7 @@ Tests/PyCalTests/                   # 遗留 XCTest
 
 推送符合 `vX.Y.Z` 的 tag（例如 `v0.2.1`，可选后缀 `v0.2.1-rc.1`）会同时触发两条 workflow：
 
-1. **`.github/workflows/flutter-release.yml`** — 先在 Linux 上跑 `flutter analyze` 和 `flutter test`。通过后并行构建 Web、Linux x64、Windows x64、macOS、Android，以及未签名 iOS。全部必需平台成功后，把产物挂到该 tag 的 GitHub Release。
+1. **`.github/workflows/flutter-release.yml`** — 先在 Linux 上跑 `flutter analyze` 和 `flutter test`。通过后并行构建 Web、Linux x64、Windows x64、macOS、Android，以及未签名 iOS。analyze / test 通过后，把**已经构建成功**的产物挂到该 tag 的 GitHub Release；某一个平台失败不会挡住其他平台的附件。
 2. **`.github/workflows/release-dmg.yml`** — 遗留 Swift macOS DMG（配齐 secrets 时 Developer ID 签名并公证）。这条 workflow 保持原样，不负责 Flutter 产物。
 
 也可以在 Actions 里手动运行 **Flutter release**，并填写已经存在的 tag。手动运行时构建的是这个 tag，不是你点运行时所在的分支。
@@ -119,7 +119,7 @@ Tests/PyCalTests/                   # 遗留 XCTest
 | `PyCal-<version>-android.apk` | release APK，使用 **debug** 签名（`android/app/build.gradle.kts` 里的 `signingConfig`；CI 没有 Play 上传密钥）。可以侧载，不能上架 Play。 |
 | `PyCal-<version>-ios-unsigned.zip` | `flutter build ios --release --no-codesign` 打出的 `Runner.app`。未签名，不能直接装到设备。App Store 签名不在本 workflow 范围内。iOS 构建失败不会让其他平台的发布失败。 |
 
-iOS 以外的平台是发布成功的必要条件。构建产物也会留在该次 Actions run 的 artifacts 里，方便在 Release 上传之前查看。
+Web、Linux、Windows、macOS、Android 仍是 workflow 变红的必要条件：它们之中有失败时，成功的产物照样上传，整次 workflow 仍是失败。未签名 iOS 失败不会单独让 workflow 失败。构建产物也会留在该次 Actions run 的 artifacts 里，方便在 Release 上传之前查看。
 
 ## 遗留 Swift 应用
 
