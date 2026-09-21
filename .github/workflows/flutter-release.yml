@@ -2,8 +2,11 @@
 #
 # Pushing a vX.Y.Z tag (or running this workflow manually with that tag)
 # analyzes and tests once, then builds Web, Linux, Windows, macOS, Android,
-# and unsigned iOS in parallel. The publish job attaches those artifacts to
-# the GitHub Release for the tag.
+# and unsigned iOS in parallel. The publish job uploads whichever of those
+# artifacts were built. One platform failure does not skip the others.
+# Web, Linux, Windows, macOS, and Android are required: if any of them fails,
+# the assets that did build are still published and the workflow is marked
+# failed. Unsigned iOS is best-effort and does not fail the workflow alone.
 #
 # The legacy Swift DMG workflow (.github/workflows/release-dmg.yml) also runs
 # on v*.*.* tags. This file does not modify it. Publish only uploads Flutter
@@ -207,13 +210,70 @@ jobs:
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
 
+      # path_provider and shared_preferences are Windows plugins, so
+      # `flutter build windows` creates symlinks under
+      # windows/flutter/ephemeral/.plugin_symlinks. GitHub-hosted windows-latest
+      # is an elevated Administrator (SeCreateSymbolicLinkPrivilege) and the
+      # runner image already sets LongPathsEnabled
+      # (actions/runner-images Configure-BaseImage.ps1). Flutter's Windows
+      # GitHub Actions example does not call reg.exe
+      # (https://docs.flutter.dev/deployment/windows). This step still sets
+      # Developer Mode and long paths, then proves a symlink can be created.
+      #
+      # Do not invoke reg.exe from the job's default Git Bash shell. MSYS path
+      # conversion rewrites /t /f /v /d, and REG.EXE exits "ERROR: Invalid syntax."
+      # before the Flutter build starts. PowerShell registry cmdlets avoid that.
       - name: Enable Windows symlink support
+        shell: pwsh
         run: |
-          set -euo pipefail
-          # Flutter plugins are linked with symlinks. GitHub-hosted runners are
-          # administrators, so this turns on the developer-mode privilege.
-          reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock" /t REG_DWORD /f /v "AllowDevelopmentWithoutDevLicense" /d "1"
-          reg add "HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock" /t REG_DWORD /f /v "AllowDevelopmentWithoutDevLicense" /d "1"
+          $ErrorActionPreference = "Stop"
+          if (-not $env:RUNNER_TEMP) { $env:RUNNER_TEMP = $env:TEMP }
+
+          function Set-RegistryDword {
+            param([string]$Path, [string]$Name, [int]$Value)
+            try {
+              if (-not (Test-Path -LiteralPath $Path)) {
+                New-Item -Path $Path -Force | Out-Null
+              }
+              New-ItemProperty -Path $Path -Name $Name -Value $Value -PropertyType DWord -Force | Out-Null
+              Write-Host "Set $Path $Name=$Value"
+            } catch {
+              Write-Warning "Could not set $Path $Name ($($_.Exception.Message)). The symlink probe below decides whether the build can continue."
+            }
+          }
+
+          Set-RegistryDword "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" "LongPathsEnabled" 1
+          Set-RegistryDword "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock" "AllowDevelopmentWithoutDevLicense" 1
+          Set-RegistryDword "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock" "AllowDevelopmentWithoutDevLicense" 1
+
+          $longPaths = (Get-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -ErrorAction SilentlyContinue).LongPathsEnabled
+          Write-Host "LongPathsEnabled=$longPaths"
+
+          function Test-SymlinkCreation {
+            $probe = Join-Path $env:RUNNER_TEMP ("pycal-symlink-" + [guid]::NewGuid().ToString("N"))
+            New-Item -ItemType Directory -Path $probe | Out-Null
+            try {
+              $target = Join-Path $probe "target.txt"
+              $link = Join-Path $probe "link.txt"
+              Set-Content -LiteralPath $target -Value "ok" -Encoding ascii
+              New-Item -ItemType SymbolicLink -Path $link -Target $target | Out-Null
+              $read = (Get-Content -LiteralPath $link -Raw).Trim()
+              return ($read -eq "ok")
+            } catch {
+              Write-Warning "Symlink probe failed: $($_.Exception.Message)"
+              return $false
+            } finally {
+              if (Test-Path -LiteralPath $probe) {
+                Remove-Item -LiteralPath $probe -Recurse -Force -ErrorAction SilentlyContinue
+              }
+            }
+          }
+
+          $canLink = Test-SymlinkCreation
+          if (-not $canLink) {
+            throw "This runner cannot create symbolic links. Flutter plugin builds need that for windows/flutter/ephemeral/.plugin_symlinks. Developer Mode and LongPathsEnabled were set with PowerShell before this probe."
+          }
+          Write-Host "Windows symlink probe succeeded."
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
@@ -458,14 +518,10 @@ jobs:
   publish:
     name: Publish GitHub Release
     needs: [quality, web, linux, windows, macos, android, ios]
-    if: >-
-      always() &&
-      needs.quality.result == 'success' &&
-      needs.web.result == 'success' &&
-      needs.linux.result == 'success' &&
-      needs.windows.result == 'success' &&
-      needs.macos.result == 'success' &&
-      needs.android.result == 'success'
+    # Upload after analyze/test even when a platform build failed. Required
+    # platforms still fail this job after the upload, so the workflow stays red.
+    # Unsigned iOS is continue-on-error and is not in that check.
+    if: "${{ always() && !cancelled() && needs.quality.result == 'success' }}"
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -475,6 +531,11 @@ jobs:
       PYCAL_VERSION: ${{ needs.quality.outputs.version }}
       PYCAL_BUILD_NAME: ${{ needs.quality.outputs.build_name }}
       PYCAL_TAG: ${{ needs.quality.outputs.tag }}
+      PYCAL_RESULT_WEB: ${{ needs.web.result }}
+      PYCAL_RESULT_LINUX: ${{ needs.linux.result }}
+      PYCAL_RESULT_WINDOWS: ${{ needs.windows.result }}
+      PYCAL_RESULT_MACOS: ${{ needs.macos.result }}
+      PYCAL_RESULT_ANDROID: ${{ needs.android.result }}
     steps:
       - name: Download build artifacts
         uses: actions/download-artifact@v4
@@ -510,11 +571,21 @@ jobs:
             "PyCal-${PYCAL_VERSION}-macos.zip"
             "PyCal-${PYCAL_VERSION}-android.apk"
           )
+          declare -A required_results=(
+            ["PyCal-${PYCAL_VERSION}-web.tar.gz"]="${PYCAL_RESULT_WEB}"
+            ["PyCal-${PYCAL_VERSION}-linux-x64.tar.gz"]="${PYCAL_RESULT_LINUX}"
+            ["PyCal-${PYCAL_VERSION}-windows-x64.zip"]="${PYCAL_RESULT_WINDOWS}"
+            ["PyCal-${PYCAL_VERSION}-macos.zip"]="${PYCAL_RESULT_MACOS}"
+            ["PyCal-${PYCAL_VERSION}-android.apk"]="${PYCAL_RESULT_ANDROID}"
+          )
+          # Do not exit here. A missing Windows zip must not block the web,
+          # Linux, macOS, and Android files that did build. The job fails
+          # after upload when a required platform did not succeed.
+          missing_required=()
           for name in "${required[@]}"; do
             if [[ -z "${checksums[${name}]+x}" ]]; then
-              echo "Missing required artifact ${name}" >&2
-              printf '%s\n' "${!checksums[@]}" >&2
-              exit 1
+              missing_required+=("${name}")
+              echo "Required artifact not produced on this run: ${name} (job result: ${required_results[${name}]})" >&2
             fi
           done
 
@@ -614,7 +685,16 @@ jobs:
           if [[ -z "${checksums[${ios_name}]+x}" ]]; then
             {
               echo
-              echo "The unsigned iOS build did not produce ${ios_name} on this run. The other platforms were still published. App Store signing is out of scope."
+              echo "The unsigned iOS build did not produce ${ios_name} on this run. Unsigned iOS is best-effort and does not by itself fail the workflow. App Store signing is out of scope."
+            } >> "${notes}"
+          fi
+          if [[ ${#missing_required[@]} -gt 0 ]]; then
+            {
+              echo
+              echo "Some required builds were not produced on this run and are absent from the new uploads. Builds that succeeded were still uploaded with \`gh release upload --clobber\`. This workflow run is marked failed until every required platform succeeds:"
+              for name in "${missing_required[@]}"; do
+                echo "- \`${name}\` (job result: ${required_results[${name}]})"
+              done
             } >> "${notes}"
           fi
           {
@@ -675,3 +755,19 @@ jobs:
             cat "${notes}"
           } >> "${GITHUB_STEP_SUMMARY}"
           echo "Release: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/tag/${PYCAL_TAG}"
+
+          required_failed=0
+          for name in "${required[@]}"; do
+            result="${required_results[${name}]}"
+            if [[ "${result}" != "success" ]]; then
+              echo "Required platform job for ${name} result is ${result}." >&2
+              required_failed=1
+            elif [[ -z "${checksums[${name}]+x}" ]]; then
+              echo "Required artifact ${name} is missing even though its job succeeded." >&2
+              required_failed=1
+            fi
+          done
+          if [[ "${required_failed}" -ne 0 ]]; then
+            echo "Flutter assets that were built are on the release. Failing this job so the workflow stays red: a required platform did not succeed." >&2
+            exit 1
+          fi
