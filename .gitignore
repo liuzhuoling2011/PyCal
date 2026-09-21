@@ -1,5 +1,43 @@
+# Swift / Xcode (legacy)
 .build/
 Build/
 .superpowers/
 xcuserdata/
 *.xcuserstate
+
+# Flutter
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+.pub/
+build/
+coverage/
+
+# Symbolication / obfuscation
+app.*.symbols
+app.*.map.json
+
+# Android Studio / IntelliJ
+*.iml
+.idea/
+
+# Generated plugin registrants
+**/GeneratedPluginRegistrant.*
+
+# Exceptions to the above
+!**/ios/Runner/GeneratedPluginRegistrant.*
+!**/macos/Flutter/GeneratedPluginRegistrant.swift
+
+# Miscellaneous
+*.class
+*.log
+*.pyc
+*.swp
+.DS_Store
+.atom/
+.buildlog/
+.history
+.svn/
+migrate_working_dir/

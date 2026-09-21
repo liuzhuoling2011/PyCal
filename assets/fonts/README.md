@@ -1,0 +1,1 @@
+`NotoSansSC-UI.ttf` is a small subset of [Noto Sans SC](https://fonts.google.com/noto/specimen/Noto+Sans+SC) (SIL Open Font License 1.1) covering PyCal’s Chinese UI labels and ASCII. It is not a complete CJK font.
