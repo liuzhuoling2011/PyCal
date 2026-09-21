@@ -50,6 +50,10 @@ if 'if: "${{ always() && !cancelled() && needs.quality.result == \'success\' }}"
     sys.exit("publish if-condition is not the partial-upload gate")
 if "gh release upload" not in text or "--clobber" not in text:
     sys.exit("publish must keep gh release upload --clobber")
+if 'GH_REPO: ${{ github.repository }}' not in text:
+    sys.exit("publish must set GH_REPO so gh works without a checkout")
+if '-R "${GITHUB_REPOSITORY}"' not in text:
+    sys.exit("publish must pass -R ${GITHUB_REPOSITORY} to gh release commands")
 print("static workflow checks ok")
 PY
 
