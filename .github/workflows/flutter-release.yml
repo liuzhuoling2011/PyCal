@@ -547,6 +547,8 @@ jobs:
       - name: Upload assets and write release notes
         env:
           GH_TOKEN: ${{ github.token }}
+          # Publish has no checkout; gh must not rely on ambient git remotes.
+          GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           shopt -s nullglob
@@ -590,8 +592,8 @@ jobs:
           done
 
           preexisting="${RUNNER_TEMP}/preexisting.txt"
-          if gh release view "${PYCAL_TAG}" >/dev/null 2>&1; then
-            gh release view "${PYCAL_TAG}" --json assets --jq '.assets[].name' | sort > "${preexisting}"
+          if gh release view "${PYCAL_TAG}" -R "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            gh release view "${PYCAL_TAG}" -R "${GITHUB_REPOSITORY}" --json assets --jq '.assets[].name' | sort > "${preexisting}"
           else
             : > "${preexisting}"
           fi
@@ -707,7 +709,7 @@ jobs:
           release_upload() {
             local attempt
             for attempt in 1 2 3 4 5; do
-              if gh release upload "${PYCAL_TAG}" "$@" --clobber; then
+              if gh release upload "${PYCAL_TAG}" "$@" --clobber -R "${GITHUB_REPOSITORY}"; then
                 return 0
               fi
               echo "gh release upload failed (attempt ${attempt}); retrying in $((attempt * 5))s" >&2
@@ -717,14 +719,14 @@ jobs:
             return 1
           }
 
-          if gh release view "${PYCAL_TAG}" >/dev/null 2>&1; then
+          if gh release view "${PYCAL_TAG}" -R "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
             release_upload "${files[@]}"
           else
             create_args=(--title "PyCal ${PYCAL_VERSION}" --notes-file "${notes}")
             if [[ "${PYCAL_VERSION}" == *-* ]]; then
               create_args+=(--prerelease)
             fi
-            if ! gh release create "${PYCAL_TAG}" "${create_args[@]}" "${files[@]}"; then
+            if ! gh release create "${PYCAL_TAG}" "${create_args[@]}" "${files[@]}" -R "${GITHUB_REPOSITORY}"; then
               # The legacy DMG workflow may have created the release first.
               release_upload "${files[@]}"
             fi
@@ -733,10 +735,10 @@ jobs:
           if [[ "${PYCAL_VERSION}" == *-* ]]; then
             edit_args+=(--prerelease)
           fi
-          gh release edit "${PYCAL_TAG}" "${edit_args[@]}"
+          gh release edit "${PYCAL_TAG}" "${edit_args[@]}" -R "${GITHUB_REPOSITORY}"
 
           listed="${RUNNER_TEMP}/listed-assets.txt"
-          gh release view "${PYCAL_TAG}" --json assets --jq '.assets[].name' | sort > "${listed}"
+          gh release view "${PYCAL_TAG}" -R "${GITHUB_REPOSITORY}" --json assets --jq '.assets[].name' | sort > "${listed}"
           missing=0
           for file in "${files[@]}"; do
             name="$(basename "${file}")"
