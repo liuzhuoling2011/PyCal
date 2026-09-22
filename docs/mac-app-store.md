@@ -24,7 +24,7 @@ Developer ID / GitHub DMG **也用同一个 ID**。没有必要给直接分发�
 | 上传 | `notarytool` + `stapler` | Xcode Organizer / `xcodebuild -exportArchive` / Transporter / `iTMSTransporter` |
 | 不要用 | — | **`notarytool`、`stapler`、已弃用的 `altool --upload-app`**。公证是 Developer ID 的事；MAS 包由 Apple 重签 |
 
-现有 `Scripts/build-macos-app.sh` 和 `.github/workflows/release-dmg.yml` **保持原样用途**：`CODE_SIGNING_ALLOWED=NO` 之后只加 Developer ID，**不**传入 `PyCal.entitlements`。不要把 MAS 的 Apple Distribution 证书塞进 DMG workflow。
+GitHub Release 的 DMG 由 [`.github/workflows/flutter-release.yml`](../.github/workflows/flutter-release.yml) 构建 Flutter `PyCal.app`，再用 `Scripts/make-macos-dmg.sh` 做 Developer ID 签名（**不**传 entitlements，因此不带 App Sandbox）和公证。遗留 Swift 的 `Scripts/build-macos-app.sh` 只留给本机 `./Scripts/run-macos.sh`：`CODE_SIGNING_ALLOWED=NO` 之后只加 Developer ID，**不**传入 `PyCal.entitlements`。不要把 MAS 的 Apple Distribution 证书塞进这条 DMG 发布。
 
 ## 工程里已经对齐的
 
@@ -118,7 +118,7 @@ xcrun stapler staple …        # 同上
 xcrun altool --upload-app …   # 已弃用
 ```
 
-没有配 MAS 证书时，不要为了「CI 也能上架」去改 `release-dmg.yml`。MAS 密钥和 Developer ID `.p12` 不是同一张证书；硬接到现有 DMG job 会把两条线搅在一起。
+没有配 MAS 证书时，不要为了「CI 也能上架」去改 `.github/workflows/flutter-release.yml`。MAS 密钥和 Developer ID `.p12` 不是同一张证书；硬接到 DMG job 会把两条线搅在一起。
 
 ## App Store Connect 元数据（只列必填级）
 
@@ -143,7 +143,7 @@ xcrun altool --upload-app …   # 已弃用
 4. **在 iPhone destination 上 Archive**：会打成 iOS，对不上「先上 Mac」。命令行务必 `generic/platform=macOS`。
 5. **沙盒数据与 DMG 数据不互通**：同一台机器上，商店版看不到 DMG 版的 `~/Library/Application Support/PyCal`。沙盒进程也读不了那条路径（除非加 MAS 审核不喜欢的 temporary-exception）。首次从商店安装是空历史，这是预期，不是丢档 bug。
 6. **`swift run` / `./Scripts/run-macos.sh` 不是商店包**：命令行包没有走 MAS 签名；商店行为请用 Xcode Run（带 entitlements）或 Archive 导出的包验证。
-7. **本环境 / 普通 Linux CI 不能 Archive**：必须 Mac + Xcode。不要把 MAS 上传塞进现有 `macos-latest` DMG job。
+7. **本环境 / 普通 Linux CI 不能 Archive**：必须 Mac + Xcode。不要把 MAS 上传塞进 Flutter release 的 `macos-latest` DMG job。
 8. **iOS App Store 不在本次范围**：同一工程已能编 iOS，但商店记录、截图、审核另做。
 
 未发现「开了沙盒就跑不起来」的 API。若以后加「打开任意文件夹的 json」、网络同步或辅助功能，再补对应 entitlement，并准备审核说明。
