@@ -174,3 +174,116 @@ pycal_staple() {
     xcrun stapler staple "$file"
     xcrun stapler validate "$file"
 }
+
+# Release asset name. Tag v0.2.1 → PyCal-0.2.1.dmg; v0.2.1-rc.1 → PyCal-0.2.1-rc.1.dmg.
+pycal_dmg_basename() {
+    local version="$1"
+    if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+        echo "Invalid DMG version '$version' (expected X.Y.Z or X.Y.Z-suffix)" >&2
+        return 1
+    fi
+    printf '%s\n' "PyCal-${version}.dmg"
+}
+
+pycal_codesign_item() {
+    local target="$1"
+    local identity="$2"
+    # Hardened runtime + secure timestamp are required for notarization.
+    # No --entitlements: app-sandbox is restricted and this direct-distribution
+    # path does not embed a provisioning profile (same policy as the old DMG).
+    codesign --force --options runtime --timestamp --generate-entitlement-der \
+        --sign "$identity" "$target"
+}
+
+# Sign nested frameworks, dylibs, and bundles inside-out, then the outer app.
+# Call this before notarization. It strips xattrs first; do not call it after staple.
+pycal_codesign_app() {
+    local app="$1"
+    local identity="$2"
+    local list item entitlements
+
+    if [[ ! -d "$app/Contents" ]]; then
+        echo "pycal_codesign_app: $app is not an application bundle" >&2
+        return 1
+    fi
+    if [[ -z "$identity" ]]; then
+        echo "pycal_codesign_app: empty signing identity" >&2
+        return 1
+    fi
+
+    if command -v xattr >/dev/null 2>&1; then
+        # Finder info and resource forks make the notary service reject the upload.
+        # Quarantine-only cleanup is wrong here: there is no staple yet.
+        xattr -cr "$app" || true
+    fi
+
+    list="$(mktemp)"
+    find "$app" -depth \( \
+        -name '*.framework' -o \
+        -name '*.dylib' -o \
+        -name '*.so' -o \
+        -name '*.bundle' -o \
+        -name '*.appex' -o \
+        -name '*.xpc' -o \
+        -name '*.app' \
+        \) -print > "$list"
+
+    while IFS= read -r item; do
+        [[ -z "$item" || "$item" == "$app" ]] && continue
+        echo "Signing $item"
+        pycal_codesign_item "$item" "$identity" || {
+            rm -f "$list"
+            return 1
+        }
+    done < "$list"
+    rm -f "$list"
+
+    echo "Signing $app"
+    pycal_codesign_item "$app" "$identity" || return 1
+    codesign --verify --deep --strict --verbose=2 "$app" || return 1
+
+    entitlements="$(codesign -d --entitlements :- "$app" 2>/dev/null || true)"
+    if [[ "$entitlements" == *"com.apple.security.app-sandbox"* ]]; then
+        echo "Refusing to notarize $app: com.apple.security.app-sandbox is present." >&2
+        echo "Developer ID downloads in this repo are signed without a provisioning profile." >&2
+        return 1
+    fi
+
+    pycal_assert_developer_id_signatures "$app"
+}
+
+pycal_assert_developer_id_signatures() {
+    local root="$1"
+    local list item details
+    list="$(mktemp)"
+    find "$root" \( \
+        -name '*.framework' -o \
+        -name '*.dylib' -o \
+        -name '*.bundle' -o \
+        -name '*.appex' -o \
+        -name '*.app' \
+        \) -print > "$list"
+
+    while IFS= read -r item; do
+        [[ -z "$item" ]] && continue
+        if ! details="$(codesign -dv --verbose=4 "$item" 2>&1)"; then
+            echo "codesign -dv failed for $item" >&2
+            printf '%s\n' "$details" >&2
+            rm -f "$list"
+            return 1
+        fi
+        if [[ "$details" != *"Authority=Developer ID Application:"* ]]; then
+            echo "Missing Developer ID Application authority: $item" >&2
+            printf '%s\n' "$details" >&2
+            rm -f "$list"
+            return 1
+        fi
+        if [[ -n "${APPLE_TEAM_ID:-}" && "$details" != *"TeamIdentifier=${APPLE_TEAM_ID}"* ]]; then
+            echo "TeamIdentifier is not ${APPLE_TEAM_ID}: $item" >&2
+            printf '%s\n' "$details" >&2
+            rm -f "$list"
+            return 1
+        fi
+    done < "$list"
+    rm -f "$list"
+}

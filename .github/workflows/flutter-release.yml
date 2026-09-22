@@ -1,17 +1,21 @@
 # Flutter multi-platform release.
 #
 # Pushing a vX.Y.Z tag (or running this workflow manually with that tag)
-# analyzes and tests once, then builds Web, Linux, Windows, macOS, Android,
-# and unsigned iOS in parallel. The publish job uploads whichever of those
-# artifacts were built. One platform failure does not skip the others.
-# Web, Linux, Windows, macOS, and Android are required: if any of them fails,
-# the assets that did build are still published and the workflow is marked
-# failed. Unsigned iOS is best-effort and does not fail the workflow alone.
+# analyzes and tests once, then builds Web, Linux, Windows, macOS, and Android
+# in parallel. The publish job uploads whichever of those artifacts were built.
+# One platform failure does not skip the others. All five are required: if any
+# fails, the assets that did build are still published and the workflow is
+# marked failed.
 #
-# The legacy Swift DMG workflow (.github/workflows/release-dmg.yml) also runs
-# on v*.*.* tags. This file does not modify it. Publish only uploads Flutter
-# assets with `gh release upload --clobber`, which replaces files of the same
-# name and leaves every other asset in place, including PyCal-<version>.dmg.
+# macOS is a Developer ID–signed, notarized, stapled disk image named
+# PyCal-<version>.dmg (tag v0.2.1 → PyCal-0.2.1.dmg, tag v0.2.1-rc.1 →
+# PyCal-0.2.1-rc.1.dmg). Incomplete Apple secrets fail the macOS job. This
+# workflow does not build an ad-hoc macOS zip or an unsigned iOS zip.
+# iOS distribution (unsigned zip, TestFlight, App Store) is deferred.
+#
+# `gh release upload --clobber` replaces files of the same name and does not
+# delete other assets. A new tag therefore has one macOS DMG. Older tags such
+# as v0.2.1 keep whatever was uploaded then until a new tag is published.
 
 name: Flutter release
 
@@ -322,16 +326,45 @@ jobs:
     name: macOS
     needs: quality
     runs-on: macos-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     env:
       PYCAL_VERSION: ${{ needs.quality.outputs.version }}
       PYCAL_BUILD_NAME: ${{ needs.quality.outputs.build_name }}
       LANG: en_US.UTF-8
+      DEVELOPER_ID_P12_BASE64: ${{ secrets.DEVELOPER_ID_P12_BASE64 }}
+      DEVELOPER_ID_P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+      APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+      APP_STORE_CONNECT_API_KEY_P8: ${{ secrets.APP_STORE_CONNECT_API_KEY_P8 }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+
+      # Same policy as the old DMG scripts: partial secrets fail in
+      # pycal_release_mode. Empty secrets return "unsigned"; this job still
+      # refuses that, because a zip or unsigned DMG is not an installable
+      # double-click download.
+      - name: Require Developer ID and notarization secrets
+        run: |
+          set -euo pipefail
+          # shellcheck source=Scripts/lib-macos-release.sh
+          source Scripts/lib-macos-release.sh
+          mode="$(pycal_release_mode)"
+          if [[ "${mode}" != "notarized" ]]; then
+            echo "macOS release requires Developer ID signing, notarization, and stapling." >&2
+            echo "Current mode: ${mode}. Refusing to upload an unsigned zip or DMG." >&2
+            echo "Set all six secrets from docs/release.md:" >&2
+            echo "  DEVELOPER_ID_P12_BASE64, DEVELOPER_ID_P12_PASSWORD, APPLE_TEAM_ID," >&2
+            echo "  APP_STORE_CONNECT_KEY_ID, APP_STORE_CONNECT_ISSUER_ID, APP_STORE_CONNECT_API_KEY_P8." >&2
+            exit 1
+          fi
+          echo "Secrets complete: will Developer ID sign, notarize, and staple."
+
+      - name: Import Developer ID certificate
+        run: Scripts/ci-import-signing.sh
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
@@ -348,9 +381,9 @@ jobs:
       - name: Build macOS
         run: |
           set -euo pipefail
-          # Ad-hoc identity "-" is already the Xcode Release setting. No
-          # Developer ID or notarization secrets are required. Gatekeeper still
-          # blocks a normal double-click after this zip is downloaded.
+          # Xcode still ad-hoc signs (CODE_SIGN_IDENTITY = "-"). Developer ID
+          # signing happens in make-macos-dmg.sh so nested Flutter frameworks
+          # get the hardened runtime without a Mac App Store provisioning profile.
           flutter build macos --release \
             --build-name="${PYCAL_BUILD_NAME}" \
             --build-number="${PYCAL_BUILD_NUMBER}"
@@ -360,15 +393,38 @@ jobs:
             find build/macos -maxdepth 6 -type d -name '*.app' >&2 || true
             exit 1
           fi
-          ditto -c -k --keepParent "${app}" "PyCal-${PYCAL_VERSION}-macos.zip"
+
+      - name: Sign, notarize, and package DMG
+        run: |
+          set -euo pipefail
+          app="build/macos/Build/Products/Release/PyCal.app"
+          export PYCAL_RELEASE_MODE=notarized
+          export PYCAL_DMG_VERSION="${PYCAL_VERSION}"
+          mkdir -p dist
+          Scripts/make-macos-dmg.sh "${app}" dist
+          dmg="dist/PyCal-${PYCAL_VERSION}.dmg"
+          if [[ ! -f "${dmg}" ]]; then
+            echo "Expected ${dmg}" >&2
+            ls -la dist >&2 || true
+            exit 1
+          fi
+          shasum -a 256 "${dmg}"
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
           name: PyCal-${{ needs.quality.outputs.version }}-macos
-          path: PyCal-${{ needs.quality.outputs.version }}-macos.zip
+          path: dist/PyCal-${{ needs.quality.outputs.version }}.dmg
           if-no-files-found: error
           compression-level: 0
+
+      - name: Delete temporary signing keychain
+        if: always()
+        run: |
+          set -euo pipefail
+          if [[ -n "${PYCAL_KEYCHAIN_PATH:-}" ]]; then
+            security delete-keychain "${PYCAL_KEYCHAIN_PATH}" || true
+          fi
 
   android:
     name: Android APK
@@ -457,70 +513,11 @@ jobs:
           if-no-files-found: error
           compression-level: 0
 
-  ios:
-    name: iOS unsigned
-    needs: quality
-    runs-on: macos-latest
-    timeout-minutes: 60
-    # The build uses --no-codesign and should succeed without an Apple team.
-    # If Xcode or CocoaPods still fails, keep the other platform artifacts.
-    continue-on-error: true
-    env:
-      PYCAL_VERSION: ${{ needs.quality.outputs.version }}
-      PYCAL_BUILD_NAME: ${{ needs.quality.outputs.build_name }}
-      LANG: en_US.UTF-8
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
-
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-          cache: true
-
-      - name: Install dependencies
-        run: flutter pub get
-
-      - name: Build unsigned iOS
-        run: |
-          set -euo pipefail
-          flutter build ios --release --no-codesign \
-            --build-name="${PYCAL_BUILD_NAME}" \
-            --build-number="${PYCAL_BUILD_NUMBER}"
-          app=""
-          for candidate in \
-            build/ios/iphoneos/Runner.app \
-            build/ios/Release-iphoneos/Runner.app
-          do
-            if [[ -d "${candidate}" ]]; then
-              app="${candidate}"
-              break
-            fi
-          done
-          if [[ -z "${app}" ]]; then
-            echo "Runner.app not found" >&2
-            find build/ios -maxdepth 4 -type d -name '*.app' >&2 || true
-            exit 1
-          fi
-          ditto -c -k --keepParent "${app}" "PyCal-${PYCAL_VERSION}-ios-unsigned.zip"
-
-      - name: Upload workflow artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: PyCal-${{ needs.quality.outputs.version }}-ios-unsigned
-          path: PyCal-${{ needs.quality.outputs.version }}-ios-unsigned.zip
-          if-no-files-found: error
-          compression-level: 0
-
   publish:
     name: Publish GitHub Release
-    needs: [quality, web, linux, windows, macos, android, ios]
+    needs: [quality, web, linux, windows, macos, android]
     # Upload after analyze/test even when a platform build failed. Required
     # platforms still fail this job after the upload, so the workflow stays red.
-    # Unsigned iOS is continue-on-error and is not in that check.
     if: "${{ always() && !cancelled() && needs.quality.result == 'success' }}"
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -570,14 +567,14 @@ jobs:
             "PyCal-${PYCAL_VERSION}-web.tar.gz"
             "PyCal-${PYCAL_VERSION}-linux-x64.tar.gz"
             "PyCal-${PYCAL_VERSION}-windows-x64.zip"
-            "PyCal-${PYCAL_VERSION}-macos.zip"
+            "PyCal-${PYCAL_VERSION}.dmg"
             "PyCal-${PYCAL_VERSION}-android.apk"
           )
           declare -A required_results=(
             ["PyCal-${PYCAL_VERSION}-web.tar.gz"]="${PYCAL_RESULT_WEB}"
             ["PyCal-${PYCAL_VERSION}-linux-x64.tar.gz"]="${PYCAL_RESULT_LINUX}"
             ["PyCal-${PYCAL_VERSION}-windows-x64.zip"]="${PYCAL_RESULT_WINDOWS}"
-            ["PyCal-${PYCAL_VERSION}-macos.zip"]="${PYCAL_RESULT_MACOS}"
+            ["PyCal-${PYCAL_VERSION}.dmg"]="${PYCAL_RESULT_MACOS}"
             ["PyCal-${PYCAL_VERSION}-android.apk"]="${PYCAL_RESULT_ANDROID}"
           )
           # Do not exit here. A missing Windows zip must not block the web,
@@ -610,16 +607,20 @@ jobs:
                 echo "Windows x64 release build. Unsigned. SmartScreen may warn on first launch."
                 ;;
               *-macos.zip)
-                echo "Flutter macOS PyCal.app, ad-hoc signed only. Gatekeeper blocks a normal double-click on a browser download. Control-click the app and choose Open, or clear quarantine on that copy with: xattr -dr com.apple.quarantine PyCal.app. This zip is not a notarized disk image."
+                echo "Previous ad-hoc macOS zip. This workflow no longer builds it. Use the notarized PyCal-${PYCAL_VERSION}.dmg."
                 ;;
               *-android.apk)
                 echo "Android release APK signed with the debug keystore. No Play upload key is configured. Sideload only; not acceptable to the Play Store."
                 ;;
               *-ios-unsigned.zip)
-                echo "Unsigned iOS Runner.app from flutter build ios --release --no-codesign. Not installable on a device. App Store signing is out of scope."
+                echo "Previous unsigned iOS zip. This workflow no longer builds it. iOS distribution is deferred."
                 ;;
               *.dmg)
-                echo "Legacy Swift macOS disk image from release-dmg.yml. This workflow does not replace or delete it. Developer ID signing and notarization are described in docs/release.md."
+                if [[ -n "${checksums[$1]+x}" ]]; then
+                  echo "Flutter macOS disk image. Developer ID signed, notarized, and stapled. Open the DMG, drag PyCal to Applications, then double-click."
+                else
+                  echo "Already on this release; this run did not upload a replacement. Tags cut before the Flutter DMG change (for example v0.2.1) may still be the old Swift image until a new tag is published."
+                fi
                 ;;
               *)
                 echo "Existing release asset. This workflow does not delete it."
@@ -635,9 +636,11 @@ jobs:
             echo
             echo "Flutter multi-platform build from tag ${PYCAL_TAG}."
             echo
-            echo "These artifacts do not use an Apple Developer ID or a Play upload key. Unsigned and debug-signed files are intentional."
+            echo "macOS is \`PyCal-${PYCAL_VERSION}.dmg\`: Developer ID signed, notarized, and stapled. Download it, open the disk image, drag PyCal to Applications, and double-click."
             echo
-            echo "The legacy Swift workflow (.github/workflows/release-dmg.yml) may also attach PyCal-${PYCAL_VERSION}.dmg to this same release. Uploading here uses gh release upload --clobber, which replaces only files of the same name."
+            echo "Windows is unsigned. Android is signed with the debug keystore. iOS is not built; unsigned iOS and TestFlight are deferred."
+            echo
+            echo "\`gh release upload --clobber\` replaces files of the same name and does not delete other assets. v0.2.1 and earlier tags keep their previous files until a new tag is published."
             echo
             echo "| Asset | SHA-256 | Notes |"
             echo "| --- | --- | --- |"
@@ -660,10 +663,8 @@ jobs:
             "PyCal-${PYCAL_VERSION}-web.tar.gz"
             "PyCal-${PYCAL_VERSION}-linux-x64.tar.gz"
             "PyCal-${PYCAL_VERSION}-windows-x64.zip"
-            "PyCal-${PYCAL_VERSION}-macos.zip"
-            "PyCal-${PYCAL_VERSION}-android.apk"
-            "PyCal-${PYCAL_VERSION}-ios-unsigned.zip"
             "PyCal-${PYCAL_VERSION}.dmg"
+            "PyCal-${PYCAL_VERSION}-android.apk"
           )
           for name in "${preferred[@]}"; do
             if [[ -n "${checksums[${name}]+x}" ]] || grep -Fxq "${name}" "${preexisting}"; then
@@ -683,13 +684,6 @@ jobs:
             fi
           done < "${preexisting}"
 
-          ios_name="PyCal-${PYCAL_VERSION}-ios-unsigned.zip"
-          if [[ -z "${checksums[${ios_name}]+x}" ]]; then
-            {
-              echo
-              echo "The unsigned iOS build did not produce ${ios_name} on this run. Unsigned iOS is best-effort and does not by itself fail the workflow. App Store signing is out of scope."
-            } >> "${notes}"
-          fi
           if [[ ${#missing_required[@]} -gt 0 ]]; then
             {
               echo
@@ -727,7 +721,7 @@ jobs:
               create_args+=(--prerelease)
             fi
             if ! gh release create "${PYCAL_TAG}" "${create_args[@]}" "${files[@]}" -R "${GITHUB_REPOSITORY}"; then
-              # The legacy DMG workflow may have created the release first.
+              # Another run may have created the release between view and create.
               release_upload "${files[@]}"
             fi
           fi

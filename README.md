@@ -99,27 +99,29 @@ Tests/PyCalTests/                   # 遗留 XCTest
 
 ## 发布
 
-推送符合 `vX.Y.Z` 的 tag（例如 `v0.2.1`，可选后缀 `v0.2.1-rc.1`）会同时触发两条 workflow：
+推送符合 `vX.Y.Z` 的 tag（例如 `v0.2.2`，可选后缀 `v0.2.2-rc.1`）会触发 **`.github/workflows/flutter-release.yml`**：
 
-1. **`.github/workflows/flutter-release.yml`** — 先在 Linux 上跑 `flutter analyze` 和 `flutter test`。通过后并行构建 Web、Linux x64、Windows x64、macOS、Android，以及未签名 iOS。analyze / test 通过后，把**已经构建成功**的产物挂到该 tag 的 GitHub Release；某一个平台失败不会挡住其他平台的附件。
-2. **`.github/workflows/release-dmg.yml`** — 遗留 Swift macOS DMG（配齐 secrets 时 Developer ID 签名并公证）。这条 workflow 保持原样，不负责 Flutter 产物。
+1. 在 Linux 上跑 `flutter analyze` 和 `flutter test`。
+2. 通过后并行构建 Web、Linux x64、Windows x64、macOS、Android。
+3. 把**已经构建成功**的产物挂到该 tag 的 GitHub Release。某一个平台失败不会挡住其他平台的附件；Web、Linux、Windows、macOS、Android 任一失败仍会让整次 workflow 变红。
 
-也可以在 Actions 里手动运行 **Flutter release**，并填写已经存在的 tag。手动运行时构建的是这个 tag，不是你点运行时所在的分支。
+也可以在 Actions 里手动运行 **Flutter release**，并填写已经存在的 tag。手动运行时构建的是这个 tag，不是你点运行时所在的分支。带 `-` 的版本（例如 `v0.2.2-rc.1`）会标成 prerelease。
 
-版本号从 tag 解析（`v0.2.1` → `0.2.1`），用 `flutter build --build-name` / `--build-number` 写入各平台产物。仓库里的 `pubspec.yaml` 仍是开发版本号，发布 job 不会改它。不需要 Apple Developer ID 或 Play 上传密钥。
+版本号从 tag 解析（`v0.2.2` → `0.2.2`），用 `flutter build --build-name` / `--build-number` 写入各平台产物。仓库里的 `pubspec.yaml` 仍是开发版本号，发布 job 不会改它。macOS 需要仓库里已经配置的 Developer ID 和 App Store Connect API 密钥；没有配齐时 macOS job 失败，不会再上传一个看起来能安装的 zip。Android 仍然没有 Play 上传密钥。
 
-若该 tag 的 Release 已经存在（手动创建，或由 Swift DMG workflow 先创建），Flutter 发布只会用 `gh release upload --clobber` **覆盖同名文件**，不会删除其他附件，尤其不会删掉 `PyCal-<version>.dmg`。Release 还不存在时，会新建一个并写上 Flutter 多平台说明。两条 workflow 都会改 Release 正文：后结束的那条会覆盖说明文字，但不会删掉另一条已经上传的文件。
+`gh release upload --clobber` 只覆盖同名文件，不删除该 Release 上的其他附件。`v0.2.1` 以及更早的 tag 仍保留当时上传的文件（包括旧的 Swift `PyCal-<version>.dmg`、ad-hoc 的 `PyCal-<version>-macos.zip` 和 `PyCal-<version>-ios-unsigned.zip`），直到你发布一个新 tag。本 workflow 不会去删那些历史附件。
 
 | 产物 | 内容 |
 | --- | --- |
 | `PyCal-<version>-web.tar.gz` | `flutter build web --release` 的静态站点。解压后直接托管该目录。 |
 | `PyCal-<version>-linux-x64.tar.gz` | Linux x64 release bundle（`build/linux/x64/release/bundle`）。解压后运行 `./pycal`。 |
 | `PyCal-<version>-windows-x64.zip` | Windows x64。未签名，首次打开时 SmartScreen 可能提示。 |
-| `PyCal-<version>-macos.zip` | Flutter `PyCal.app`，只有 ad-hoc 签名，没有公证。从浏览器下载后 Gatekeeper 会拦截普通双击。对本份 App Control-click → **Open**，或只清掉这一份的隔离属性：`xattr -dr com.apple.quarantine PyCal.app`。这不是公证过的 DMG。 |
+| `PyCal-<version>.dmg` | Flutter macOS 磁盘映像。Developer ID 签名、Apple 公证并 staple。打开 DMG，把 PyCal 拖到 Applications，再双击。不需要关 Gatekeeper，也不需要 `xattr`。这是 Release 上唯一的 macOS 安装包，沿用原来 Swift DMG 的文件名。 |
 | `PyCal-<version>-android.apk` | release APK，使用 **debug** 签名（`android/app/build.gradle.kts` 里的 `signingConfig`；CI 没有 Play 上传密钥）。可以侧载，不能上架 Play。 |
-| `PyCal-<version>-ios-unsigned.zip` | `flutter build ios --release --no-codesign` 打出的 `Runner.app`。未签名，不能直接装到设备。App Store 签名不在本 workflow 范围内。iOS 构建失败不会让其他平台的发布失败。 |
 
-Web、Linux、Windows、macOS、Android 仍是 workflow 变红的必要条件：它们之中有失败时，成功的产物照样上传，整次 workflow 仍是失败。未签名 iOS 失败不会单独让 workflow 失败。构建产物也会留在该次 Actions run 的 artifacts 里，方便在 Release 上传之前查看。
+iOS 暂不发布。workflow 不再构建 `PyCal-<version>-ios-unsigned.zip`，也不做 TestFlight / App Store 上传。
+
+签名、公证 secrets 和本地打 DMG 的步骤见 [docs/release.md](docs/release.md)。构建产物也会留在该次 Actions run 的 artifacts 里，方便在 Release 上传之前查看。
 
 ## 遗留 Swift 应用
 
@@ -131,4 +133,4 @@ swift run PyCal
 swift test
 ```
 
-遗留 Swift 应用的 macOS DMG、公证和 Mac App Store 流程见 [docs/release.md](docs/release.md) 与 [docs/mac-app-store.md](docs/mac-app-store.md)。Flutter 桌面 zip 由上面的发布 workflow 单独产出，不会替换这条 Swift DMG 流程。
+GitHub Release 上的 macOS 磁盘映像是 Flutter 版，签名和公证见 [docs/release.md](docs/release.md)。Mac App Store 仍是另一条线，见 [docs/mac-app-store.md](docs/mac-app-store.md)。`./Scripts/run-macos.sh` 只在本机编译安装遗留 Swift 应用，不再往 Release 上传 Swift DMG。

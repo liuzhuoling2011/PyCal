@@ -1,9 +1,11 @@
 #!/bin/bash
-# Package PyCal.app into PyCal-$version.dmg.
-# When a Developer ID identity and notary credentials are available, the app and
-# DMG are signed, notarized, and stapled — that is what makes a download
-# double-clickable. Without credentials the script still writes an unsigned DMG
-# and prints a Gatekeeper warning (it does not disable Gatekeeper).
+# Package a PyCal.app (Flutter or the local Swift bundle) into PyCal-$version.dmg.
+# When a Developer ID identity and notary credentials are available, nested code
+# is signed inside-out with the hardened runtime, then the app and DMG are
+# notarized and stapled. That is what makes download → open DMG → drag to
+# Applications → double-click work. Without credentials the script still writes
+# an unsigned DMG and prints a Gatekeeper warning (it does not disable Gatekeeper).
+# CI must not rely on that fallback: flutter-release.yml requires mode=notarized.
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "$0")" && pwd)"
@@ -38,7 +40,7 @@ trap cleanup EXIT
 if [[ ! -d "$app_path" ]]; then
     echo "找不到 $app_path" >&2
     echo "用法: $0 [PyCal.app] [输出目录]" >&2
-    echo "先运行: $root_dir/Scripts/build-macos-app.sh" >&2
+    echo "Flutter: flutter build macos --release && $0 build/macos/Build/Products/Release/PyCal.app Build" >&2
     exit 1
 fi
 
@@ -56,13 +58,16 @@ if [[ -z "${version}" ]]; then
     echo "internal error: marketing version is empty" >&2
     exit 1
 fi
-dmg_path="$output_dir/PyCal-${version}.dmg"
+# PYCAL_DMG_VERSION overrides the filename only. Flutter pre-release tags use
+# it so PyCal-0.2.1-rc.1.dmg can wrap an app whose short version is 0.2.1.
+dmg_version="${PYCAL_DMG_VERSION:-$version}"
+dmg_basename="$(pycal_dmg_basename "$dmg_version")"
+dmg_path="$output_dir/$dmg_basename"
 
 if identity="$(pycal_find_developer_id_identity)"; then
     echo "Signing with $identity"
     signed=1
-    codesign --force --options runtime --timestamp --sign "$identity" "$app_path"
-    codesign --verify --strict --verbose=2 "$app_path"
+    pycal_codesign_app "$app_path" "$identity"
 else
     echo "No Developer ID Application identity in the keychain."
     if [[ -n "${GITHUB_ACTIONS:-}" && "${ALLOW_UNSIGNED_DMG:-}" != "1" && "${PYCAL_RELEASE_MODE:-}" != "unsigned" ]]; then
@@ -106,7 +111,7 @@ ditto --noqtn "$app_path" "$payload/PyCal.app"
 ln -s /Applications "$payload/Applications"
 pycal_clear_quarantine "$payload/PyCal.app"
 if [[ "$signed" -eq 1 ]]; then
-    codesign --verify --strict --verbose=2 "$payload/PyCal.app"
+    codesign --verify --deep --strict --verbose=2 "$payload/PyCal.app"
 fi
 
 layout_dmg() {
@@ -150,7 +155,8 @@ echo "Creating disk image…"
 rm -f "$dmg_path"
 
 if [[ -z "${GITHUB_ACTIONS:-}" && "${SKIP_DMG_LAYOUT:-}" != "1" ]]; then
-    hdiutil create -volname "PyCal" -size 80m -ov -fs HFS+ "$rw_dmg" >/dev/null
+    # Flutter release bundles do not fit in the old 80m Swift image.
+    hdiutil create -volname "PyCal" -size 512m -ov -fs HFS+ "$rw_dmg" >/dev/null
     if layout_dmg; then
         hdiutil convert "$rw_dmg" -format UDZO -imagekey zlib-level=9 -o "$dmg_path" >/dev/null
     else
@@ -198,7 +204,8 @@ echo "Wrote $dmg_path"
 if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
     {
         echo "dmg_path=$dmg_path"
-        echo "version=$version"
+        echo "version=$dmg_version"
+        echo "marketing_version=$version"
         echo "signed=$signed"
         echo "notarized=$notarized"
     } >> "$GITHUB_OUTPUT"
@@ -208,4 +215,9 @@ if [[ "$notarized" -eq 1 ]]; then
     echo "PYCAL_DMG_STATUS=notarized"
 else
     echo "PYCAL_DMG_STATUS=unsigned-or-not-notarized"
+fi
+
+if [[ -n "${GITHUB_ACTIONS:-}" && "${PYCAL_RELEASE_MODE:-}" == "notarized" && "$notarized" -ne 1 ]]; then
+    echo "CI expected a notarized, stapled DMG (PYCAL_RELEASE_MODE=notarized) but this package was not notarized." >&2
+    exit 1
 fi

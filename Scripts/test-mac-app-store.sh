@@ -114,9 +114,31 @@ if re.search(r"codesign\s+.*--entitlements", dmg_build):
     print("FAIL: DMG codesign must not pass --entitlements (keeps Application Support unsandboxed)", file=sys.stderr)
     sys.exit(1)
 
-workflow = (root / ".github/workflows/release-dmg.yml").read_text(encoding="utf-8")
+legacy = root / ".github/workflows/release-dmg.yml"
+if legacy.exists():
+    print("FAIL: legacy Swift DMG workflow release-dmg.yml should be removed", file=sys.stderr)
+    sys.exit(1)
+workflow = (root / ".github/workflows/flutter-release.yml").read_text(encoding="utf-8")
 if "archive-mac-app-store.sh" in workflow or "exportArchive" in workflow:
-    print("FAIL: DMG workflow must not grow a MAS export/upload step", file=sys.stderr)
+    print("FAIL: Flutter release workflow must not grow a MAS export/upload step", file=sys.stderr)
+    sys.exit(1)
+lib = (root / "Scripts/lib-macos-release.sh").read_text(encoding="utf-8")
+if "pycal_codesign_app" not in lib:
+    print("FAIL: nested Developer ID signing helper missing", file=sys.stderr)
+    sys.exit(1)
+for line in lib.splitlines():
+    stripped = line.lstrip()
+    if stripped.startswith("#"):
+        continue
+    if "codesign" in line and "--entitlements" in line and "--sign" in line:
+        print(f"FAIL: Developer ID helper must not pass --entitlements when signing: {line}", file=sys.stderr)
+        sys.exit(1)
+    if "codesign" in line and re.search(r"codesign\s+[^\n]*--entitlements[^\n]*--sign", line):
+        print(f"FAIL: Developer ID helper must not pass --entitlements when signing: {line}", file=sys.stderr)
+        sys.exit(1)
+dmg_script = (root / "Scripts/make-macos-dmg.sh").read_text(encoding="utf-8")
+if "pycal_codesign_app" not in dmg_script:
+    print("FAIL: make-macos-dmg.sh must sign via pycal_codesign_app", file=sys.stderr)
     sys.exit(1)
 
 archive = (root / "Scripts/archive-mac-app-store.sh").read_text(encoding="utf-8")

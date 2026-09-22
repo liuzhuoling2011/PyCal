@@ -3,8 +3,9 @@
 # .github/workflows/flutter-release.yml.
 #
 # A required-platform failure must still upload the artifacts that were built,
-# must pass --clobber, and must not delete a preexisting Swift DMG. The script
-# then exits non-zero so the workflow stays red. Unsigned iOS is optional.
+# must pass --clobber, and must not delete preexisting assets. The script then
+# exits non-zero so the workflow stays red. macOS is PyCal-<version>.dmg.
+# Unsigned iOS is not built.
 set -euo pipefail
 
 if [[ "${BASH_VERSINFO[0]}" -lt 4 ]]; then
@@ -54,6 +55,33 @@ if 'GH_REPO: ${{ github.repository }}' not in text:
     sys.exit("publish must set GH_REPO so gh works without a checkout")
 if '-R "${GITHUB_REPOSITORY}"' not in text:
     sys.exit("publish must pass -R ${GITHUB_REPOSITORY} to gh release commands")
+if "flutter build ios" in text or "--no-codesign" in text:
+    sys.exit("unsigned iOS build must be removed")
+if "PyCal-${PYCAL_VERSION}-macos.zip" in text:
+    sys.exit("macos zip must not be a release asset")
+if "release-dmg.yml" in text:
+    sys.exit("legacy Swift DMG workflow must not be referenced")
+legacy = Path(sys.argv[1]).with_name("release-dmg.yml")
+if legacy.exists():
+    sys.exit(f"legacy workflow still present: {legacy}")
+for needle in (
+    "DEVELOPER_ID_P12_BASE64",
+    "DEVELOPER_ID_P12_PASSWORD",
+    "APPLE_TEAM_ID",
+    "APP_STORE_CONNECT_KEY_ID",
+    "APP_STORE_CONNECT_ISSUER_ID",
+    "APP_STORE_CONNECT_API_KEY_P8",
+    "Scripts/ci-import-signing.sh",
+    "Scripts/make-macos-dmg.sh",
+    "pycal_release_mode",
+    "runs-on: macos-latest",
+    "Refusing to upload an unsigned zip or DMG",
+    'path: dist/PyCal-${{ needs.quality.outputs.version }}.dmg',
+):
+    if needle not in text:
+        sys.exit(f"flutter-release.yml missing {needle}")
+if "needs: [quality, web, linux, windows, macos, android, ios]" in text:
+    sys.exit("publish still depends on the iOS job")
 print("static workflow checks ok")
 PY
 
@@ -127,16 +155,24 @@ run_case() {
     partial)
       printf 'web' > "${work}/dist/PyCal-0.2.1-web.tar.gz"
       printf 'linux' > "${work}/dist/PyCal-0.2.1-linux-x64.tar.gz"
-      printf 'mac' > "${work}/dist/PyCal-0.2.1-macos.zip"
+      printf 'dmg' > "${work}/dist/PyCal-0.2.1.dmg"
       printf 'apk' > "${work}/dist/PyCal-0.2.1-android.apk"
-      printf '%s\n' "PyCal-0.2.1.dmg" > "${work}/fake/assets.txt"
+      printf '%s\n' "PyCal-0.2.1.dmg" "PyCal-0.2.1-macos.zip" "PyCal-0.2.1-ios-unsigned.zip" > "${work}/fake/assets.txt"
       : > "${work}/fake/exists"
       ;;
-    required-no-ios)
+    macos-missing)
       printf 'web' > "${work}/dist/PyCal-0.2.1-web.tar.gz"
       printf 'linux' > "${work}/dist/PyCal-0.2.1-linux-x64.tar.gz"
       printf 'win' > "${work}/dist/PyCal-0.2.1-windows-x64.zip"
-      printf 'mac' > "${work}/dist/PyCal-0.2.1-macos.zip"
+      printf 'apk' > "${work}/dist/PyCal-0.2.1-android.apk"
+      printf '%s\n' "PyCal-0.2.1.dmg" "PyCal-0.2.1-macos.zip" > "${work}/fake/assets.txt"
+      : > "${work}/fake/exists"
+      ;;
+    complete)
+      printf 'web' > "${work}/dist/PyCal-0.2.1-web.tar.gz"
+      printf 'linux' > "${work}/dist/PyCal-0.2.1-linux-x64.tar.gz"
+      printf 'win' > "${work}/dist/PyCal-0.2.1-windows-x64.zip"
+      printf 'dmg' > "${work}/dist/PyCal-0.2.1.dmg"
       printf 'apk' > "${work}/dist/PyCal-0.2.1-android.apk"
       printf '%s\n' "PyCal-0.2.1.dmg" > "${work}/fake/assets.txt"
       : > "${work}/fake/exists"
@@ -147,9 +183,8 @@ run_case() {
       printf 'web' > "${work}/dist/PyCal-0.2.1-web.tar.gz"
       printf 'linux' > "${work}/dist/PyCal-0.2.1-linux-x64.tar.gz"
       printf 'win' > "${work}/dist/PyCal-0.2.1-windows-x64.zip"
-      printf 'mac' > "${work}/dist/PyCal-0.2.1-macos.zip"
+      printf 'dmg' > "${work}/dist/PyCal-0.2.1.dmg"
       printf 'apk' > "${work}/dist/PyCal-0.2.1-android.apk"
-      printf 'ios' > "${work}/dist/PyCal-0.2.1-ios-unsigned.zip"
       ;;
     *)
       fail "unknown mode ${mode}"
@@ -199,10 +234,6 @@ case "${sub}" in
       if [[ "${arg}" == "--clobber" ]]; then
         local_clobber=1
       fi
-      if [[ "${arg}" == *.dmg ]]; then
-        echo "refusing to upload dmg: $*" >&2
-        exit 1
-      fi
       if [[ -f "${arg}" ]]; then
         basename "${arg}" >> "${assets}"
       fi
@@ -218,10 +249,6 @@ case "${sub}" in
   create)
     arg=""
     for arg in "$@"; do
-      if [[ "${arg}" == *.dmg ]]; then
-        echo "refusing to upload dmg on create: $*" >&2
-        exit 1
-      fi
       if [[ -f "${arg}" ]]; then
         basename "${arg}" >> "${assets}"
       fi
@@ -283,22 +310,45 @@ EOF
         fail "${label}: uploaded a windows zip that was not built"
       fi
       [[ -f "${work}/fake/notes.md" ]] || fail "${label}: release notes were not written"
-      grep -q 'PyCal-0.2.1.dmg' "${work}/fake/notes.md" || fail "${label}: notes dropped the Swift DMG"
-      grep -q 'does not replace or delete' "${work}/fake/notes.md" || fail "${label}: notes no longer protect the DMG"
+      grep -q 'PyCal-0.2.1.dmg' "${work}/fake/notes.md" || fail "${label}: notes dropped the DMG"
+      grep -q 'Developer ID signed, notarized, and stapled' "${work}/fake/notes.md" || fail "${label}: notes do not describe the Flutter DMG"
+      grep -q 'This workflow no longer builds it' "${work}/fake/notes.md" || fail "${label}: notes dropped historical zip/iOS assets"
+      grep -q 'does not delete other assets' "${work}/fake/notes.md" || fail "${label}: notes no longer say preexisting assets are kept"
       grep -q 'PyCal-0.2.1-windows-x64.zip' "${work}/fake/notes.md" || fail "${label}: notes omit the missing windows asset"
       grep -q 'job result: failure' "${work}/fake/notes.md" || fail "${label}: notes omit the windows job result"
+      if grep -q 'ios-unsigned.zip' "${work}/fake/calls.log"; then
+        fail "${label}: uploaded an unsigned iOS zip"
+      fi
       grep -q 'Failing this job so the workflow stays red' "${stderr}" || fail "${label}: job did not fail closed"
       ;;
-    required-no-ios)
+    macos-missing)
       grep -q -- '--clobber' "${work}/fake/calls.log" || fail "${label}: missing --clobber"
-      grep -q 'Unsigned iOS is best-effort' "${work}/fake/notes.md" || fail "${label}: missing iOS note"
+      if grep 'release upload' "${work}/fake/calls.log" | grep -q '\.dmg'; then
+        fail "${label}: uploaded a DMG that was not built"
+      fi
+      grep -q 'this run did not upload a replacement' "${work}/fake/notes.md" || fail "${label}: notes claim the old DMG was replaced"
+      grep -q 'PyCal-0.2.1.dmg' "${work}/fake/notes.md" || fail "${label}: notes dropped the preexisting DMG"
+      grep -q 'This workflow no longer builds it' "${work}/fake/notes.md" || fail "${label}: notes dropped the historical macOS zip"
+      grep -q 'job result: failure' "${work}/fake/notes.md" || fail "${label}: notes omit the macOS job result"
+      grep -q 'Failing this job so the workflow stays red' "${stderr}" || fail "${label}: job did not fail closed"
+      ;;
+    complete)
+      grep -q -- '--clobber' "${work}/fake/calls.log" || fail "${label}: missing --clobber"
+      grep -q 'Developer ID signed, notarized, and stapled' "${work}/fake/notes.md" || fail "${label}: missing notarized DMG note"
+      grep -q 'drag PyCal to Applications' "${work}/fake/notes.md" || fail "${label}: missing install instructions"
       if grep -q 'Some required builds were not produced' "${work}/fake/notes.md"; then
-        fail "${label}: treated optional iOS as a required miss"
+        fail "${label}: treated a successful run as a required miss"
+      fi
+      if grep -q 'best-effort' "${work}/fake/notes.md"; then
+        fail "${label}: still describes unsigned iOS as best-effort"
       fi
       if grep -q 'Failing this job so the workflow stays red' "${stderr}"; then
-        fail "${label}: optional iOS failure failed the publish job"
+        fail "${label}: complete publish failed the job"
       fi
-      grep -q 'PyCal-0.2.1.dmg' "${work}/fake/notes.md" || fail "${label}: notes dropped the Swift DMG"
+      grep -q 'PyCal-0.2.1.dmg' "${work}/fake/assets.txt" || fail "${label}: DMG was not uploaded"
+      if grep -q 'ios-unsigned' "${work}/fake/assets.txt"; then
+        fail "${label}: uploaded unsigned iOS"
+      fi
       ;;
     empty)
       if [[ -s "${work}/fake/calls.log" ]]; then
@@ -310,8 +360,10 @@ EOF
       if grep -q 'delete-asset' "${work}/fake/calls.log"; then
         fail "${label}: deleted a release asset"
       fi
-      if grep -q '\.dmg' "${work}/fake/calls.log"; then
-        fail "${label}: create arguments included a dmg"
+      grep -q 'PyCal-0.2.1.dmg' "${work}/fake/assets.txt" || fail "${label}: DMG missing after create"
+      grep -q 'Developer ID signed, notarized, and stapled' "${work}/fake/notes.md" || fail "${label}: create notes omit the DMG"
+      if grep -q 'ios-unsigned' "${work}/fake/assets.txt"; then
+        fail "${label}: create uploaded unsigned iOS"
       fi
       grep -q 'PyCal-0.2.1-windows-x64.zip' "${work}/fake/assets.txt" || fail "${label}: windows asset missing after create"
       ;;
@@ -327,10 +379,58 @@ RESULT_ANDROID=success
 run_case partial 1 partial
 
 RESULT_WINDOWS=success
-run_case required-no-ios 0 required-no-ios
+RESULT_MACOS=failure
+run_case macos-missing 1 macos-missing
+
+RESULT_MACOS=success
+run_case complete 0 complete
 
 run_case empty 1 empty
 
 run_case create 0 create
+
+lib="${repo_root}/Scripts/lib-macos-release.sh"
+# shellcheck source=lib-macos-release.sh
+source "${lib}"
+
+mode="$(env -i PATH="${PATH}" bash -c 'source "$1"; pycal_release_mode' _ "${lib}")" \
+  || fail "empty secrets should return unsigned, not fail"
+[[ "${mode}" == "unsigned" ]] || fail "expected unsigned mode, got ${mode}"
+
+if env -i PATH="${PATH}" DEVELOPER_ID_P12_BASE64=dummy \
+  bash -c 'source "$1"; pycal_release_mode' _ "${lib}"; then
+  fail "partial signing secrets should fail"
+fi
+
+if env -i PATH="${PATH}" GITHUB_ACTIONS=true \
+  DEVELOPER_ID_P12_BASE64=a DEVELOPER_ID_P12_PASSWORD=b APPLE_TEAM_ID=TEAMID1234 \
+  bash -c 'source "$1"; pycal_release_mode' _ "${lib}"; then
+  fail "signing without notarization must fail in CI"
+fi
+
+mode="$(env -i PATH="${PATH}" \
+  DEVELOPER_ID_P12_BASE64=a DEVELOPER_ID_P12_PASSWORD=b APPLE_TEAM_ID=TEAMID1234 \
+  APP_STORE_CONNECT_KEY_ID=KEY APP_STORE_CONNECT_ISSUER_ID=ISS APP_STORE_CONNECT_API_KEY_P8=p8 \
+  bash -c 'source "$1"; pycal_release_mode' _ "${lib}")" \
+  || fail "complete secrets should be notarized"
+[[ "${mode}" == "notarized" ]] || fail "expected notarized mode, got ${mode}"
+
+name="$(pycal_dmg_basename 0.2.1)" || fail "dmg basename 0.2.1"
+[[ "${name}" == "PyCal-0.2.1.dmg" ]] || fail "unexpected basename ${name}"
+name="$(pycal_dmg_basename 0.2.1-rc.1)" || fail "dmg basename rc"
+[[ "${name}" == "PyCal-0.2.1-rc.1.dmg" ]] || fail "unexpected rc basename ${name}"
+if pycal_dmg_basename 'not-a-version' >/dev/null; then
+  fail "invalid DMG version was accepted"
+fi
+
+if ! grep -q 'pycal_codesign_app' "${repo_root}/Scripts/make-macos-dmg.sh"; then
+  fail "make-macos-dmg.sh must sign nested code via pycal_codesign_app"
+fi
+if grep -nE 'codesign[^\n]*--sign[^\n]*--entitlements|codesign[^\n]*--entitlements[^\n]*--sign' "${lib}" | grep -v ':[ 	]*#'; then
+  fail "Developer ID helper must not pass --entitlements when signing"
+fi
+if ! grep -q 'codesign -d --entitlements' "${lib}"; then
+  fail "Developer ID helper should inspect entitlements after signing"
+fi
 
 echo "flutter release publish checks ok"
