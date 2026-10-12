@@ -7,6 +7,8 @@ PyCal 是一个跨平台小工具箱，现以 **Flutter** 为主要实现，可�
 
 原生 SwiftUI（macOS / iPhone）代码仍保留在 `Sources/PyCal` 与 `PyCal.xcodeproj`，仅作为过渡期对照，**不再是默认入口**。
 
+在线试用：https://liuzhuoling2011.github.io/PyCal/
+
 ## 运行
 
 需要 [Flutter](https://docs.flutter.dev/install) 3.24+（开发时使用 3.47 / Dart 3.13）。
@@ -67,7 +69,9 @@ flutter analyze
 
 计算与时间换算的核心逻辑在纯 Dart 中（`lib/calculator/`、`lib/time_converter/time_converter_store.dart`），不依赖 UI。测试从原来的 Swift XCTest 移植并扩展，见 `test/expression_evaluator_test.dart` 与 `test/time_converter_test.dart`。
 
-CI（`.github/workflows/flutter.yml`）在 push / pull request 上运行 `flutter pub get`、`flutter analyze`、`flutter test` 和 `flutter build web`。
+CI（`.github/workflows/flutter.yml`）在 push / pull request 上运行 `flutter pub get`、`flutter analyze`、`flutter test` 和 `flutter build web`。这次 web 构建用默认 base href `/`，只检查能否编过，不发布。
+
+推送到 `main` 时，`.github/workflows/pages.yml` 会另外用 `--base-href /PyCal/` 构建并部署到 GitHub Pages。见下方「GitHub Pages」。
 
 推送 `vX.Y.Z` tag 时，`.github/workflows/flutter-release.yml` 会先再跑一遍 analyze 和 test，再并行构建各平台，并把构建成功的产物上传到该 tag 的 GitHub Release。见下方「发布」。
 
@@ -97,6 +101,44 @@ Sources/PyCal/                      # 遗留 SwiftUI
 Tests/PyCalTests/                   # 遗留 XCTest
 ```
 
+## GitHub Pages
+
+线上站点：https://liuzhuoling2011.github.io/PyCal/
+
+推送到 `main`，或在 Actions 里手动运行 **Deploy GitHub Pages**，会跑 [`.github/workflows/pages.yml`](.github/workflows/pages.yml)：
+
+1. `flutter build web --release --base-href /PyCal/`。项目站点挂在 `github.io/PyCal/` 下，base href 必须是 `/PyCal/`，否则脚本和资源会去域名根路径请求而 404。
+2. 把 `docs/privacy.html` 和 `docs/support.html` 复制到 `build/web/`，并写入 `.nojekyll`。Flutter Web 产物里有下划线开头的文件；没有 `.nojekyll` 时，Pages 的 Jekyll 会丢掉它们。
+3. 用 `actions/configure-pages`、`actions/upload-pages-artifact`（`include-hidden-files: true`，否则 `.nojekyll` 不会进产物）和 `actions/deploy-pages` 发布。部署 job 使用名为 `github-pages` 的 environment。
+
+隐私政策与支持页的地址不变，App Store Connect 可以继续用：
+
+- https://liuzhuoling2011.github.io/PyCal/privacy.html
+- https://liuzhuoling2011.github.io/PyCal/support.html
+
+正文仍以 `docs/privacy.html`、`docs/support.html` 为准，部署时复制到站点根目录。两页之间的相对链接不用改。
+
+Release 里的 `PyCal-<version>-web.tar.gz` 是另一份构建，base href 为 `/`，适合解压后放在自己的站点根目录。不要把那份 tarball 直接放到 `/PyCal/` 路径下。
+
+### 把 Pages 源改成 GitHub Actions
+
+`deploy-pages` 只有在 Pages 源是 **GitHub Actions** 时才会成功。若 Settings 里仍是 **Deploy from a branch**（`main` / `/docs`），部署 job 会失败，线上暂时还是 `docs/` 里的静态页。
+
+一次性切换：
+
+1. 打开仓库 **Settings → Pages → Build and deployment**。
+2. **Source** 选 **GitHub Actions**。
+
+仓库管理员也可以用 API（把 `build_type` 设为 `workflow`）：
+
+```sh
+gh api --method PUT -H "Accept: application/vnd.github+json" \
+  /repos/liuzhuoling2011/PyCal/pages \
+  -f build_type=workflow
+```
+
+在合并引入本 workflow 的提交时再改。提前改掉的话，旧的 `/docs` 站点会停，而 `main` 上还没有这次部署。改完之后，合并进 `main` 的 push 会部署上面的 URL。若那次 run 的 deploy job 在改源之前就已经失败，在 Actions 里重跑 **Deploy GitHub Pages** 即可。不要再把源改回 `main` / `/docs`，否则线上会变回只有隐私页和支持页的旧站点。
+
 ## 发布
 
 推送符合 `vX.Y.Z` 的 tag（例如 `v0.2.2`，可选后缀 `v0.2.2-rc.1`）会触发 **`.github/workflows/flutter-release.yml`**：
@@ -113,7 +155,7 @@ Tests/PyCalTests/                   # 遗留 XCTest
 
 | 产物 | 内容 |
 | --- | --- |
-| `PyCal-<version>-web.tar.gz` | `flutter build web --release` 的静态站点。解压后直接托管该目录。 |
+| `PyCal-<version>-web.tar.gz` | `flutter build web --release` 的静态站点，base href 为 `/`。解压后放在站点根目录托管。GitHub Pages 上的在线版是另一份 `--base-href /PyCal/` 构建，见「GitHub Pages」。 |
 | `PyCal-<version>-linux-x64.tar.gz` | Linux x64 release bundle（`build/linux/x64/release/bundle`）。解压后运行 `./pycal`。 |
 | `PyCal-<version>-windows-x64.zip` | Windows x64。未签名，首次打开时 SmartScreen 可能提示。 |
 | `PyCal-<version>.dmg` | Flutter macOS 磁盘映像。Developer ID 签名、Apple 公证并 staple。打开 DMG，把 PyCal 拖到 Applications，再双击。不需要关 Gatekeeper，也不需要 `xattr`。这是 Release 上唯一的 macOS 安装包，沿用原来 Swift DMG 的文件名。 |
