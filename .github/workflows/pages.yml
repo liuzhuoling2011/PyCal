@@ -1,0 +1,99 @@
+# Deploy the Flutter web app to GitHub Pages.
+#
+# Live site: https://liuzhuoling2011.github.io/PyCal/
+# `--base-href /PyCal/` is required so JS, assets, and the service worker load
+# under the project path instead of the domain root.
+#
+# This does not replace `.github/workflows/flutter.yml` or
+# `flutter-release.yml`. Those still build web with the default base href `/`
+# (the release tarball is for hosting at a site root).
+#
+# Pages must use GitHub Actions as the source. While it is still "Deploy from
+# a branch" (`main` / `/docs`), `deploy-pages` fails. One-time switch:
+# Settings → Pages → Build and deployment → Source: GitHub Actions.
+# A repo admin can do the same with:
+#   gh api --method PUT -H "Accept: application/vnd.github+json" \
+#     /repos/liuzhuoling2011/PyCal/pages -f build_type=workflow
+#
+# privacy.html and support.html are copied to the site root so these URLs
+# stay valid after that switch (App Store Connect already uses them):
+#   https://liuzhuoling2011.github.io/PyCal/privacy.html
+#   https://liuzhuoling2011.github.io/PyCal/support.html
+
+name: Deploy GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One production deploy at a time. Do not cancel an in-progress deploy.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build web
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build web
+        run: flutter build web --release --base-href /PyCal/
+
+      - name: Add privacy, support, and .nojekyll
+        run: |
+          set -euo pipefail
+          cp docs/privacy.html docs/support.html build/web/
+          touch build/web/.nojekyll
+          test -f build/web/index.html
+          test -f build/web/.nojekyll
+          test -f build/web/privacy.html
+          test -f build/web/support.html
+          if grep -q 'FLUTTER_BASE_HREF' build/web/index.html; then
+            echo "base href placeholder was not replaced in build/web/index.html" >&2
+            exit 1
+          fi
+          grep -q '<base href="/PyCal/">' build/web/index.html
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v6
+
+      # v5 excludes dotfiles unless include-hidden-files is true, which would
+      # drop .nojekyll. Jekyll would then skip Flutter files whose names start
+      # with "_".
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: build/web
+          include-hidden-files: true
+
+  deploy:
+    name: Deploy
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5
